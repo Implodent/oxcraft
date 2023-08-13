@@ -11,3 +11,5 @@ serde.workspace = true
 derive_more.workspace = true
 chashmap = "2.2.2"
 tracing.workspace = true
+thiserror.workspace = true
+bytes.workspace = true

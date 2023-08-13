@@ -3,7 +3,7 @@
 //! Systems and resources can be composed together using the [`Plugin`] builder.
 //! The resulting plugin can then be instantiated with
 //! [`crate::World::with_plugin`].
-use std::{future::Future, any::TypeId};
+use std::{any::TypeId, future::Future};
 
 use dagga::Node;
 
@@ -49,18 +49,27 @@ pub struct LazyAsyncSystem {
 /// [`World::with_plugin`](crate::World::with_plugin), all resources and systems
 /// will be created once and will be unique.
 #[derive(Default)]
-pub struct Plugin {
+pub struct WorldBuilder {
     pub(crate) resources: Vec<LazyResource>,
     pub(crate) sync_systems: Vec<SyncSystemWithDeps>,
     pub(crate) async_systems: Vec<LazyAsyncSystem>,
 }
 
-impl Plugin {
-    pub fn with_plugin(mut self, plug: impl Into<Plugin>) -> Self {
-        let plug = plug.into();
-        self.resources.extend(plug.resources);
-        self.sync_systems.extend(plug.sync_systems);
-        self.async_systems.extend(plug.async_systems);
+pub trait Plugin {
+    fn apply(self, builder: &mut WorldBuilder);
+}
+
+impl Plugin for WorldBuilder {
+    fn apply(self, builder: &mut WorldBuilder) {
+        builder.resources.extend(self.resources);
+        builder.sync_systems.extend(self.sync_systems);
+        builder.async_systems.extend(self.async_systems);
+    }
+}
+
+impl WorldBuilder {
+    pub fn with_plugin(&mut self, plug: impl Plugin) -> &mut Self {
+        plug.apply(self);
         self
     }
 
@@ -72,9 +81,9 @@ impl Plugin {
     /// [`World`](crate::World), if possible - otherwise instantiation will
     /// err.
     pub fn with_resource<S: CanFetch, T: IsResource>(
-        mut self,
+        &mut self,
         create: impl FnOnce(S) -> anyhow::Result<T> + 'static,
-    ) -> Self {
+    ) -> &mut Self {
         self.resources
             .push(LazyResource::new(move |loans: &mut LoanManager| {
                 let s: S = S::construct(loans)?;
@@ -86,14 +95,14 @@ impl Plugin {
 
     /// Add a system to the plugin.
     pub fn with_system<T: CanFetch + Send + Sync + 'static>(
-        mut self,
+        &mut self,
         name: &str,
         system: impl FnMut(T) -> anyhow::Result<ShouldContinue> + Send + Sync + 'static,
         // other systems this system must run after
         after_deps: &[&str],
         // other systems this system must run before
         before_deps: &[&str],
-    ) -> Self {
+    ) -> &mut Self {
         let after_deps = if after_deps.is_empty() {
             None
         } else {
@@ -114,10 +123,10 @@ impl Plugin {
     }
 
     pub fn with_async<Fut>(
-        mut self,
+        &mut self,
         name: impl Into<String>,
         system: impl FnOnce(Facade) -> Fut + 'static,
-    ) -> Self
+    ) -> &mut Self
     where
         Fut: Future<Output = anyhow::Result<()>> + Send + Sync + 'static,
     {
@@ -139,7 +148,7 @@ impl Plugin {
 
 #[cfg(test)]
 mod test {
-    use crate::{self as apecs, storage::*, system::*, world::World, Plugin, Read};
+    use crate::{self as apecs, storage::*, system::*, world::World, Read, WorldBuilder};
 
     #[derive(Default)]
     pub struct Number(u32);
@@ -170,8 +179,8 @@ mod test {
 
     #[test]
     fn can_build_dependent_resources() {
-        let plugin =
-            Plugin::default().with_resource::<Read<Number>, bool>(|num| Ok(num.inner().0 == 0));
+        let plugin = WorldBuilder::default()
+            .with_resource::<Read<Number>, bool>(|num| Ok(num.inner().0 == 0));
         let mut world = World::default();
         world.with_plugin(plugin).unwrap();
 

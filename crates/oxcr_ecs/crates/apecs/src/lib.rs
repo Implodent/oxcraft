@@ -37,7 +37,7 @@ pub use apecs_derive::CanFetch;
 pub use async_executor::Task;
 #[cfg(feature = "derive")]
 pub use fetch::*;
-pub use plugin::Plugin;
+pub use plugin::{Plugin, WorldBuilder};
 pub use rustc_hash::FxHashMap;
 pub use storage::{
     Components, Entry, IsBundle, IsQuery, LazyComponents, Maybe, MaybeMut, MaybeRef, Mut, Query,
@@ -602,8 +602,8 @@ pub trait CanFetch: Send + Sync + Sized {
     /// This will be used by functions like [`World::with_plugin`] to ensure
     /// that a type's resources have been created, and that the systems
     /// required for upkeep are included.
-    fn plugin() -> Plugin {
-        Plugin::default()
+    fn plugin() -> WorldBuilder {
+        WorldBuilder::default()
     }
 }
 
@@ -636,8 +636,9 @@ impl<'a, T: IsResource, G: Gen<T> + IsResource> CanFetch for Write<T, G> {
         Ok(Write(fetched, PhantomData))
     }
 
-    fn plugin() -> Plugin {
-        Plugin::default().with_resource(|_: ()| {
+    fn plugin() -> WorldBuilder {
+        let mut world = WorldBuilder::default();
+        world.with_resource(|_: ()| {
             G::generate().with_context(|| {
                 format!(
                     "Write could not generate {} with '{}'",
@@ -645,7 +646,8 @@ impl<'a, T: IsResource, G: Gen<T> + IsResource> CanFetch for Write<T, G> {
                     std::any::type_name::<G>()
                 )
             })
-        })
+        });
+        world
     }
 }
 
@@ -672,8 +674,9 @@ impl<'a, T: IsResource, G: Gen<T> + IsResource> CanFetch for Read<T, G> {
         })
     }
 
-    fn plugin() -> Plugin {
-        Plugin::default().with_resource(|_: ()| {
+    fn plugin() -> WorldBuilder {
+        let mut world = WorldBuilder::default();
+        world.with_resource(|_: ()| {
             G::generate().with_context(|| {
                 format!(
                     "Read could not generate '{}' with '{}'",
@@ -681,7 +684,8 @@ impl<'a, T: IsResource, G: Gen<T> + IsResource> CanFetch for Read<T, G> {
                     std::any::type_name::<G>()
                 )
             })
-        })
+        });
+        world
     }
 }
 

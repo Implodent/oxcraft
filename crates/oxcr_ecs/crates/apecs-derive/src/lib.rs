@@ -27,9 +27,10 @@ pub fn impl_canfetch_tuple(input: proc_macro::TokenStream) -> proc_macro::TokenS
                 ))
             }
 
-            fn plugin() -> apecs::Plugin {
-                apecs::Plugin::default()
-                    #(.with_plugin(<#tys as apecs::CanFetch>::plugin()))*
+            fn plugin() -> apecs::WorldBuilder {
+                let mut world = apecs::WorldBuilder::default();
+                #(world.with_plugin(<#tys as apecs::CanFetch>::plugin());)*
+                world
             }
         }
     };

@@ -18,3 +18,5 @@ serde = { version = "1", featurs = [ "derive" ] }
 bincode.version = "1"
 derive_more.version = "0.99.17"
 tracing.version = "0"
+thiserror.version = "1"
+bytes = { version = "1", features = [ "serde" ] }

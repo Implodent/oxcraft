@@ -10,10 +10,11 @@ use anyhow::Context;
 use async_executor::{Executor, Task};
 use rustc_hash::FxHashMap;
 
+use crate::plugin::Plugin;
 use crate::QueryGuard;
 use crate::{
     chan::{self, mpsc, oneshot, spsc},
-    plugin::Plugin,
+    plugin::WorldBuilder,
     resource_manager::{LoanManager, ResourceManager},
     schedule::{RequestSchedule, SystemSchedule},
     storage::{Components, Entry, IsBundle, IsQuery},
@@ -666,8 +667,8 @@ impl Default for World {
 
 impl World {
     /// Create a `Plugin` to build the world.
-    pub fn builder() -> Plugin {
-        Plugin::default()
+    pub fn builder() -> WorldBuilder {
+        WorldBuilder::default()
     }
 
     /// Create a new facade
@@ -704,11 +705,11 @@ impl World {
     ///
     /// ## Errs
     /// Errs if the plugin requires resources that cannot be created by default.
-    pub fn with_plugin(&mut self, plugin: impl Into<Plugin>) -> anyhow::Result<&mut Self> {
-        let plugin: Plugin = plugin.into();
-
+    pub fn with_plugin(&mut self, plugin: impl Plugin) -> anyhow::Result<&mut Self> {
+        let mut plugin_data = WorldBuilder::default();
+        plugin.apply(&mut plugin_data);
         let mut missing_resources: FxHashMap<ResourceId, Vec<anyhow::Error>> = FxHashMap::default();
-        for LazyResource { id, create } in plugin.resources.into_iter() {
+        for LazyResource { id, create } in plugin_data.resources.into_iter() {
             if !self.resource_manager.has_resource(&id) {
                 log::debug!("attempting to create resource {}...", id.name);
                 match (create)(&mut self.resource_manager.as_mut_loan_manager()) {
@@ -732,13 +733,13 @@ impl World {
             missing_resources
         );
 
-        for system in plugin.sync_systems.into_iter() {
+        for system in plugin_data.sync_systems.into_iter() {
             if !self.system_schedule.contains_system(system.0.name()) {
                 self.system_schedule.add_system(system.0);
             }
         }
 
-        for asystem in plugin.async_systems.into_iter() {
+        for asystem in plugin_data.async_systems.into_iter() {
             if self.async_systems.contains_key(&asystem.name) {
                 continue;
             }

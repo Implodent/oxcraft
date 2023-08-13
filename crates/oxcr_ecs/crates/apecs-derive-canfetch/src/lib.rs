@@ -92,8 +92,8 @@ pub fn derive_canfetch(path: Path, input: DeriveInput) -> proc_macro2::TokenStre
                 Ok(#construct_return)
             }
 
-            fn plugin() -> #path::Plugin {
-                #path::Plugin::default()
+            fn plugin() -> #path::WorldBuilder {
+                #path::WorldBuilder::default()
                     #(.with_plugin(<#tys as #path::CanFetch>::plugin()))*
             }
         }
