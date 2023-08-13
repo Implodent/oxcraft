@@ -5,7 +5,7 @@ members = [
         "crates/oxcr_ecs/crates/apecs",
         "crates/oxcr_ecs/crates/apecs-derive",
         "crates/oxcr_ecs/crates/apecs-derive-canfetch",
-        "crates/oxcr_ecs/crates/benchmarks",
+        # "crates/oxcr_ecs/crates/benchmarks",
         "crates/oxcr_ecs/crates/xtask",
 ]
 resolver = "2"
