@@ -2,9 +2,10 @@ pub mod model;
 
 use chashmap::CHashMap;
 use std::{net::SocketAddr, sync::Arc};
+use tracing::info;
 
+use apecs::*;
 use model::packets::{PacketClientbound, PacketServerbound};
-use oxcr_ecs::*;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     Mutex,
@@ -31,5 +32,6 @@ pub struct Packets {
 }
 
 pub async fn lifecycle(_facade: Facade) -> anyhow::Result<()> {
+    info!("hi");
     Ok(())
 }

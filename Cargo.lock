@@ -1283,13 +1283,18 @@ dependencies = [
  "derive_more",
  "serde",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "oxcr_server"
 version = "0.1.0"
 dependencies = [
+ "apecs",
  "oxcr_net",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

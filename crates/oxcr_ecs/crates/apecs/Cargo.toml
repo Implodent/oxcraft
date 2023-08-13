@@ -14,7 +14,7 @@ panic_on_async_holdup = []
 derive = []
 
 [lib]
-name = "oxcr_ecs"
+name = "apecs"
 path = "src/lib.rs"
 bench = false
 
