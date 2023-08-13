@@ -308,7 +308,7 @@ impl<T: Any + Send + Sync + 'static> IsResource for T {}
 /// Wrapper for one fetched resource.
 ///
 /// When dropped, the wrapped resource will be sent back to the world.
-pub(crate) struct Fetched<T: IsResource> {
+pub struct Fetched<T: IsResource> {
     // should be unbounded, `send` should never fail
     resource_return_tx: chan::mpsc::Sender<(ResourceId, Resource)>,
     inner: Option<Box<T>>,
@@ -395,7 +395,7 @@ impl<T> Gen<T> for NoDefault {
 ///     assert!(no_number.is_err());
 /// }
 /// ```
-pub struct Write<T: IsResource, G: Gen<T> = SomeDefault>(Fetched<T>, PhantomData<G>);
+pub struct Write<T: IsResource, G: Gen<T> = SomeDefault>(pub Fetched<T>, PhantomData<G>);
 
 impl<T: IsResource, G: Gen<T>> Deref for Write<T, G> {
     type Target = T;
@@ -508,7 +508,7 @@ impl<T: IsResource, G: Gen<T>> Write<T, G> {
 /// }
 /// ```
 pub struct Read<T: IsResource, G: Gen<T> = SomeDefault> {
-    inner: Arc<Resource>,
+    pub inner: Arc<Resource>,
     _phantom_t: PhantomData<T>,
     _phantom_g: PhantomData<G>,
 }

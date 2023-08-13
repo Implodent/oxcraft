@@ -234,9 +234,7 @@ impl RequestSchedule {
 
             // tick the executor
             if parallelism > 1 {
-                (0..parallelism as u32)
-                    .into_par_iter()
-                    .for_each(|_| tick(extra));
+                (0..parallelism).into_par_iter().for_each(|_| tick(extra));
             } else {
                 tick(extra);
             }
