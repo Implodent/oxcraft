@@ -1,6 +1,7 @@
 #![feature(generators, generator_trait)]
 mod error;
 pub mod model;
+mod ser;
 
 use chashmap::CHashMap;
 use error::{Error, Result};
