@@ -46,7 +46,7 @@ impl Facade {
     /// accessing them and subsequently being able to run.
     pub async fn visit<D: CanFetch + Send + Sync + 'static, T: Send + Sync + 'static>(
         &mut self,
-        f: impl FnOnce(D) -> anyhow::Result<T>,
+        f: impl FnOnce(D) -> T,
     ) -> anyhow::Result<T> {
         let borrows = D::borrows();
         // request the resources from the world
@@ -77,7 +77,7 @@ impl Facade {
             )
         })?;
         let d = *box_d;
-        let t = f(d)?;
+        let t = f(d);
         Ok(t)
     }
 
