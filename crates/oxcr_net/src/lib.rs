@@ -5,16 +5,21 @@ mod ser;
 
 use chashmap::CHashMap;
 use error::{Error, Result};
-use std::{net::SocketAddr, ops::Generator, sync::Arc};
+use std::{
+    io::{BorrowedCursor, Cursor},
+    net::SocketAddr,
+    ops::Generator,
+    sync::Arc,
+};
 
 use apecs::*;
 use model::{
-    packets::{Packet, PacketClientbound},
-    State,
+    packets::{Packet, PacketClientbound, PacketServerbound},
+    State, VarInt,
 };
 use tokio::{
     io::AsyncReadExt,
-    sync::{mpsc, RwLock},
+    sync::{broadcast, mpsc, RwLock},
 };
 
 pub struct ServerLock(pub Arc<RwLock<Server>>);
@@ -27,8 +32,8 @@ pub struct Server {
 
 #[derive(Debug)]
 pub struct PlayerNet {
-    send: mpsc::UnboundedReceiver<PacketClientbound>,
-
+    send: mpsc::UnboundedSender<PacketClientbound>,
+    recv: broadcast::Receiver<PacketServerbound>,
     pub addr: SocketAddr,
     pub state: State,
 }
@@ -56,6 +61,8 @@ pub async fn accept_connections(mut facade: Facade) -> anyhow::Result<()> {
         let (tx_sb, rx_sb) = tokio::sync::broadcast::channel(100);
 
         let net = PlayerNet {
+            send: tx_cb,
+            recv: rx_sb,
             addr,
             state: State::Handshaking,
         };
@@ -73,6 +80,8 @@ pub async fn accept_connections(mut facade: Facade) -> anyhow::Result<()> {
                     let mut buf = bytes::BytesMut::with_capacity(model::MAX_PACKET_DATA);
                     loop {
                         read.read_buf(&mut buf).await?;
+                        let mut bytes = buf.iter().copied();
+                        let length = VarInt::from_bytes_iter(&mut bytes);
                     }
                 }
                 .await
