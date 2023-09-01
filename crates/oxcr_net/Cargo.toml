@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-apecs.workspace = true
+bevy.workspace = true
 tokio.workspace = true
 bincode.workspace = true
 serde.workspace = true
@@ -13,3 +13,4 @@ chashmap = "2.2.2"
 tracing.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
+aott = { git = "https://github.com/Implodent/AOTT.git", version = "0.2.0", features = ["builtin-bytes"] }

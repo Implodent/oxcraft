@@ -1,100 +1,157 @@
+use crate::ser::*;
+use ::bytes::Bytes;
+use aott::prelude::*;
 use derive_more::*;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Deref, DerefMut, Into, From, Debug, Display)]
-pub struct VarInt(pub i32);
-
-impl VarInt {
-    const SEGMENT_BITS: u8 = 0x7F;
-    const CONTINUE_BIT: u8 = 0x80;
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let mut iter = bytes.iter().copied();
-        Self::from_bytes_iter(&mut iter)
-    }
-    pub fn from_bytes_iter(bytes: &mut impl Iterator<Item = u8>) -> Option<Self> {
-        match bytes.try_fold((0i32, 0u8), |(mut value, mut position), byte| {
-            value |= ((byte & Self::SEGMENT_BITS) << position) as i32;
-
-            if (byte & Self::CONTINUE_BIT) == 0 {
-                // does not have continue bit
-                return Err(Some((value, position)));
-            }
-
-            position += 7;
-
-            if position >= 32 {
-                Err(None)
-            } else {
-                Ok((value, position))
-            }
-        }) {
-            Ok((value, _)) | Err(Some((value, _))) => Some(VarInt(value)),
-            Err(None) => None,
-        }
-    }
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut value = self.0;
-        let mut bytes = vec![];
-        loop {
-            if (value & !Self::SEGMENT_BITS as i32) == 0 {
-                bytes.push(value as u8);
-                break;
-            }
-
-            bytes.push(((value & Self::SEGMENT_BITS as i32) | Self::CONTINUE_BIT as i32) as u8);
-
-            // Note: >>> means that the sign bit is shifted with the rest of the number rather than being left alone
-            value = value.rotate_right(7);
-        }
-        bytes
-    }
-    pub fn len(&self) -> usize {
-        let mut value = self.0;
-        let mut length = 0usize;
-        loop {
-            if (value & !Self::SEGMENT_BITS as i32) == 0 {
-                length += 1;
-                break;
-            }
-            length += 1;
-            value = value.rotate_right(7);
-        }
-        length
-    }
-    // clippy why
-    pub fn is_empty(&self) -> bool {
-        self.0 == 0
+pub struct VarInt<T: LEB128Number = i32>(pub T);
+impl<T: LEB128Number> VarInt<T> {
+    pub fn max_length() -> usize {
+        max_leb128_len::<T>()
     }
 }
 
-impl Serialize for VarInt {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let b = self.to_bytes();
-        serializer.serialize_bytes(&b)
+pub trait LEB128Number {
+    fn read<'parse, 'a>(
+        input: Input<'parse, &'a [u8], extra::Err<&'a [u8]>>,
+    ) -> IResult<'parse, &'a [u8], extra::Err<&'a [u8]>, Self>;
+    fn write(self) -> Bytes;
+}
+
+/// Returns the length of the longest LEB128 encoding for `T`, assuming `T` is an integer type
+const fn max_leb128_len<T>() -> usize {
+    // The longest LEB128 encoding for an integer uses 7 bits per byte.
+    (std::mem::size_of::<T>() * 8 + 6) / 7
+}
+
+/// Returns the length of the longest LEB128 encoding of all supported integer types.
+const fn largest_max_leb128_len() -> usize {
+    max_leb128_len::<u128>()
+}
+
+macro_rules! impl_unsigned_leb128 {
+    ($($int:ty)*) => {
+        $(
+        impl LEB128Number for $int {
+            fn read<'parse, 'a>(input: Inp<'parse, 'a>) -> Res<'parse, 'a, $int> {
+                let (mut input, byte) = any(input)?;
+                if (byte & 0x80) == 0 {
+                    return Ok((input, byte as $int));
+                }
+                let mut result = (byte & 0x7f) as $int;
+                let mut shift = 7;
+                loop {
+                    let (inp, byte) = any(input)?;
+                    input = inp;
+                    if (byte & 0x80) == 0 {
+                        result |= (byte as $int) << shift;
+                        return Ok((input, result));
+                    } else {
+                        result |= ((byte & 0x7f) as $int) << shift;
+                    }
+                    shift += 7;
+                }
+            }
+        }
+        fn write(mut self) -> Bytes {
+            let mut out = [MaybeUninit::uninit(); max_leb128_len::<$int>()];
+            let mut i = 0;
+
+            loop {
+                if self < 0x80 {
+                    unsafe {
+                        *out.get_unchecked_mut(i).as_mut_ptr() = self as u8;
+                    }
+
+                    i += 1;
+                    break;
+                } else {
+                    unsafe {
+                        *out.get_unchecked_mut(i).as_mut_ptr() = ((self & 0x7f) | 0x80) as u8;
+                    }
+
+                    self >>= 7;
+                    i += 1;
+                }
+            }
+
+            Bytes::from(unsafe { ::std::mem::MaybeUninit::slice_assume_init_ref(&out.get_unchecked(..i)) })
+        })*
+    };
+}
+
+macro_rules! impl_signed_leb128 {
+    ($($int:ty)*) => {
+        $(
+            impl LEB128Number for $int {
+                fn read<'parse, 'a>(mut input: Inp<'parse, 'a>) -> Res<'parse, 'a, $int> {
+                    let mut result = 0;
+                    let mut shift = 0;
+                    let mut byte;
+
+                    loop {
+                        let (inp, by) = any(input)?;
+                        input = inp;
+                        byte = by;
+
+                        result |= <$int_ty>::from(byte & 0x7F) << shift;
+                        shift += 7;
+
+                        if (byte & 0x80) == 0 {
+                            break;
+                        }
+                    }
+
+                    if (shift < <$int_ty>::BITS) && ((byte & 0x40) != 0) {
+                        // sign extend
+                        result |= (!0 << shift);
+                    }
+
+                    Ok((input, result))
+                }
+                fn write(self) -> Bytes {
+                    let mut out = [MaybeUninit::uninit(); max_leb128_len::<$int>()];
+                    let mut i = 0;
+
+                    loop {
+                        let mut byte = (self as u8) & 0x7f;
+                        self >>= 7;
+                        let more = !(((self == 0) && ((byte & 0x40) == 0))
+                            || ((self == -1) && ((byte & 0x40) != 0)));
+
+                        if more {
+                            byte |= 0x80; // Mark this byte to show that more bytes will follow.
+                        }
+
+                        unsafe {
+                            *out.get_unchecked_mut(i).as_mut_ptr() = byte;
+                        }
+
+                        i += 1;
+
+                        if !more {
+                            break;
+                        }
+                    }
+
+                    Bytes::from(unsafe { ::std::mem::MaybeUninit::slice_assume_init_ref(&out.get_unchecked(..i)) })
+                }
+            }
+        )*
+    };
+}
+
+impl_unsigned_leb128!(u16 u32 u64 u128 usize);
+impl_signed_leb128!(i16 i32 i64 i128 isize);
+
+impl<T: LEB128Number> Deserialize for VarInt<T> {
+    fn deserialize<'parse, 'a>(input: Inp<'parse, 'a>) -> Res<'parse, 'a, Self> {
+        T::read.map(Self).parse(input)
     }
 }
 
-impl<'de> Deserialize<'de> for VarInt {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct V;
-        impl<'v> serde::de::Visitor<'v> for V {
-            type Value = VarInt;
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(formatter, "expecting VarInt")
-            }
-            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                VarInt::from_bytes(v).ok_or_else(|| E::custom("VarInt too big"))
-            }
-        }
-        deserializer.deserialize_bytes(V)
+impl<T: LEB128Number> Serialize for VarInt<T> {
+    fn serialize(&self) -> Bytes {
+        self.0.write()
     }
 }

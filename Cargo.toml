@@ -2,16 +2,10 @@
 members = [
         "crates/oxcr_net",
         "crates/oxcr_server",
-        "crates/oxcr_ecs/crates/apecs",
-        "crates/oxcr_ecs/crates/apecs-derive",
-        "crates/oxcr_ecs/crates/apecs-derive-canfetch",
-        # "crates/oxcr_ecs/crates/benchmarks",
-        "crates/oxcr_ecs/crates/xtask",
 ]
 resolver = "2"
 
 [workspace.dependencies]
-apecs.path = "crates/oxcr_ecs/crates/apecs"
 oxcr_net.path = "crates/oxcr_net"
 tokio = { version = "1", features = [ "macros", "full", "rt", "sync" ] }
 serde = { version = "1", featurs = [ "derive" ] }
@@ -20,3 +14,4 @@ derive_more.version = "0.99.17"
 tracing.version = "0"
 thiserror.version = "1"
 bytes = { version = "1", features = [ "serde" ] }
+bevy.version = "0.11.2"

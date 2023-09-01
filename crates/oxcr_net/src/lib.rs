@@ -1,10 +1,10 @@
-#![feature(generators, generator_trait)]
 mod error;
 pub mod model;
 mod ser;
 
 use chashmap::CHashMap;
 use error::{Error, Result};
+use ser::Deserialize;
 use std::{
     io::{BorrowedCursor, Cursor},
     net::SocketAddr,
@@ -14,7 +14,7 @@ use std::{
 
 use apecs::*;
 use model::{
-    packets::{Packet, PacketClientbound, PacketServerbound},
+    packets::{Packet, PacketClientbound, PacketServerbound, SerializedPacket},
     State, VarInt,
 };
 use tokio::{
@@ -32,61 +32,19 @@ pub struct Server {
 
 #[derive(Debug)]
 pub struct PlayerNet {
-    send: mpsc::UnboundedSender<PacketClientbound>,
-    recv: broadcast::Receiver<PacketServerbound>,
+    send: mpsc::UnboundedSender<SerializedPacket>,
+    recv: broadcast::Receiver<SerializedPacket>,
     pub addr: SocketAddr,
     pub state: State,
 }
 
 impl PlayerNet {
-    pub async fn recv_packet<T: Packet>(&self) -> Result<T> {}
-}
-
-pub struct OxCraftNetPlugin;
-impl Plugin for OxCraftNetPlugin {
-    fn apply(self, builder: &mut WorldBuilder) {
-        builder.with_async("accept_connections", accept_connections);
+    pub async fn recv_packet<T: Packet>(&self) -> Result<T> {
+        self.recv.recv().await?;
+    }
+    pub fn send_packet<T: Packet>(&self, packet: T) -> Result<()> {
+        Ok(self.send.send(SerializedPacket::new(packet))?)
     }
 }
 
-pub async fn accept_connections(mut facade: Facade) -> anyhow::Result<()> {
-    let server_lock = facade
-        .visit(|server: Read<ServerLock, NoDefault>| server.0.clone())
-        .await?;
-    loop {
-        let server = server_lock.read().await;
-        let (sock, addr) = server.tcp.accept().await?;
-        let (mut read, mut write) = sock.into_split();
-        let (tx_cb, rx_cb) = mpsc::unbounded_channel();
-        let (tx_sb, rx_sb) = tokio::sync::broadcast::channel(100);
-
-        let net = PlayerNet {
-            send: tx_cb,
-            recv: rx_sb,
-            addr,
-            state: State::Handshaking,
-        };
-        drop(server);
-        let server = server_lock.write().await;
-
-        if server.players.insert(addr, net).is_some() {
-            let _ = server.players.remove(&addr);
-            return Err(Error::DupePlayer.into());
-        }
-
-        facade
-            .spawn(async move {
-                if let Err::<(), Error>(e) = async move {
-                    let mut buf = bytes::BytesMut::with_capacity(model::MAX_PACKET_DATA);
-                    loop {
-                        read.read_buf(&mut buf).await?;
-                        let mut bytes = buf.iter().copied();
-                        let length = VarInt::from_bytes_iter(&mut bytes);
-                    }
-                }
-                .await
-                {}
-            })
-            .detach();
-    }
-}
+pub async fn accept_connections() {}
