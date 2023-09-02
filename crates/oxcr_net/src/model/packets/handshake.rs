@@ -1,17 +1,30 @@
 use crate::{model::State, ser::*};
 use aott::prelude::*;
+use fstr::FStr;
 
-use super::Packet;
+use super::{Packet, PacketContext};
 
-#[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Handshake {
     pub protocol_version: crate::model::VarInt,
+    pub addr: FStr<255>,
 }
 
 impl Deserialize for Handshake {
-    fn deserialize<'parse, 'a>(input: Inp<'parse, 'a>) -> Res<'parse, 'a, Self> {
-        let (input, protocol_version) = deser(input)?;
-        Ok((input, Self { protocol_version }))
+    type Context = PacketContext;
+
+    fn deserialize<'parse, 'a>(
+        input: Inp<'parse, 'a, PacketContext>,
+    ) -> Resul<'parse, 'a, Self, PacketContext> {
+        let (input, protocol_version) = deser_cx(input)?;
+        let (input, addr) = deser_cx(input)?;
+        Ok((
+            input,
+            Self {
+                protocol_version,
+                addr,
+            },
+        ))
     }
 }
 

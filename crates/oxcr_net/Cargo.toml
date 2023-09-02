@@ -13,4 +13,6 @@ chashmap = "2.2.2"
 tracing.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
-aott = { git = "https://github.com/Implodent/AOTT.git", version = "0.2.0", features = ["builtin-bytes"] }
+aott = { git = "https://github.com/Implodent/AOTT.git", features = ["builtin-bytes"] }
+bevy-tokio-tasks = "0.11.0"
+fstr = "0.2.4"

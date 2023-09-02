@@ -6,6 +6,6 @@ edition = "2021"
 [dependencies]
 oxcr_net.workspace = true
 tokio.workspace = true
-apecs.workspace = true
+bevy.workspace = true
 tracing.workspace = true
 tracing-subscriber = "0.3"
