@@ -10,6 +10,7 @@ use self::handshake::Handshake;
 use super::{LEB128Number, VarInt};
 
 pub mod handshake;
+pub mod status;
 
 #[derive(Debug, Clone)]
 pub enum PacketClientbound {}
@@ -60,13 +61,13 @@ impl SerializedPacket {
 
 impl Deserialize for SerializedPacket {
     fn deserialize<'parse, 'a>(input: Inp<'parse, 'a>) -> Resul<'parse, 'a, Self> {
-        tuple((VarInt::deserialize, VarInt::deserialize, slice_till_end))
-            .map(|(length, id, data)| Self {
-                length,
-                id,
-                data: data.into(),
-            })
-            .parse(input)
+        tuple((
+            VarInt::deserialize,
+            VarInt::deserialize,
+            slice_till_end.map(Bytes::copy_from_slice),
+        ))
+        .map(|(length, id, data)| Self { length, id, data })
+        .parse(input)
     }
 }
 impl Serialize for SerializedPacket {
@@ -74,6 +75,6 @@ impl Serialize for SerializedPacket {
         buf.reserve(self.length.length_of() + self.id.length_of() + self.data.len());
         self.length.serialize_to(buf);
         self.id.serialize_to(buf);
-        buf.put(self.data);
+        buf.put_slice(&self.data);
     }
 }

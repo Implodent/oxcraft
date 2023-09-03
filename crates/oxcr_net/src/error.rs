@@ -13,13 +13,15 @@ pub enum Error {
     #[error("Invalid packet ID: {_0}")]
     InvalidPacketId(i32),
     #[error("Packet send error: {_0:?}")]
-    Send(#[from] tokio::sync::mpsc::error::SendError<SerializedPacket>),
-    #[error("Packet send error: {_0:?}")]
-    SendSend(#[from] tokio::sync::broadcast::error::SendError<SerializedPacket>),
+    Send(#[from] flume::SendError<SerializedPacket>),
     #[error("Packet receive error: {_0:?}")]
-    Recv(#[from] tokio::sync::broadcast::error::RecvError),
+    Recv(#[from] flume::RecvError),
     #[error("Invalid UTF-8 encountered: {_0}")]
     InvalidUtf8(#[from] Utf8Error),
+    #[error("VarInt too big")]
+    VarIntTooBig,
+    #[error("JSON error: {_0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub type Result<T, E = Error> = core::result::Result<T, E>;

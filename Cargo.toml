@@ -8,7 +8,6 @@ resolver = "2"
 [workspace.dependencies]
 oxcr_net.path = "crates/oxcr_net"
 tokio = { version = "1", features = [ "macros", "full", "rt", "sync" ] }
-serde = { version = "1", featurs = [ "derive" ] }
 bincode.version = "1"
 derive_more.version = "0.99.17"
 tracing.version = "0"

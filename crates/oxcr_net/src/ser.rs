@@ -1,10 +1,15 @@
-use std::{marker::PhantomData, ops::Range};
-
-use ::bytes::{BufMut, BytesMut};
-use aott::prelude::{bytes as b, *};
-use fstr::FStr;
+use derive_more::*;
+use std::{
+    marker::PhantomData,
+    ops::{Deref, Range},
+    rc::Rc,
+    sync::Arc,
+};
 
 use crate::model::{LEB128Number, VarInt};
+use ::bytes::{BufMut, BytesMut};
+use aott::prelude::*;
+use tracing::debug;
 
 pub trait Deserialize: Sized {
     type Context = ();
@@ -100,7 +105,7 @@ pub fn slice_till_end<'a, I: SliceInput<'a>, E: ParserExtras<I>>(input: I) -> I:
     Ok((input, slice))
 }
 
-impl<const N: usize> Deserialize for fstr::FStr<N> {
+impl<const N: usize, Sy: Syncable> Deserialize for FixedStr<N, Sy> {
     type Context = ();
 
     fn deserialize<'parse, 'a>(
@@ -108,24 +113,112 @@ impl<const N: usize> Deserialize for fstr::FStr<N> {
     ) -> Resul<'parse, 'a, Self, Self::Context> {
         // get length, must be 0 <= length <= N
         let (input, VarInt(length)) = VarInt::<i32>::deserialize(input)?;
+        debug!(%length, expected_length=%N, "[fixedstr] checking length");
         assert!(length >= 0);
         let length = length as usize;
         assert!(length <= N);
-        let mut string = [0u8; N];
-        string.clone_from_slice(input.input.slice(input.offset..input.offset + length));
-        match fstr::FStr::from_inner(string) {
-            Ok(fstr) => Ok((input, fstr)),
-            Err(e) => Err((input, e.into())),
-        }
+        let string =
+            std::str::from_utf8(input.input.slice((input.offset)..(input.offset + length)))
+                .expect("invalid utf8. that's a skill issue ngl");
+        // SAFETY: checked length being <= N, can unwrap_unchecked here.
+        Ok((input, unsafe {
+            FixedStr::from_string(string).unwrap_unchecked()
+        }))
     }
 }
 
-impl<const N: usize> Serialize for FStr<N> {
+impl<const N: usize, Sy: Syncable> Serialize for FixedStr<N, Sy> {
     fn serialize_to(&self, buf: &mut BytesMut) {
         let n: i32 = N.try_into().unwrap();
         let ln = VarInt(n);
         buf.reserve(ln.length_of() + N);
         ln.serialize_to(buf);
-        buf.put_slice(&self.as_bytes()[..])
+        buf.put_slice(self.as_bytes())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FixedStr<const N: usize, Sy: Syncable = YesSync> {
+    inner: Sy::RefC<str>,
+}
+impl<const N: usize, Sy: Syncable> std::fmt::Display for FixedStr<N, Sy> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.inner.fmt(f)
+    }
+}
+impl<const N: usize, Sy: Syncable> FixedStr<N, Sy> {
+    pub fn from_string(string: &str) -> Option<Self> {
+        if string.len() > N {
+            None
+        } else {
+            Some(Self {
+                inner: Sy::refc_from_str(string),
+            })
+        }
+    }
+}
+
+impl<const N: usize, Sy: Syncable> Deref for FixedStr<N, Sy> {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.inner
+    }
+}
+
+pub trait Syncable {
+    const SYNC: bool;
+    type RefC<T: ?Sized>: Clone + Deref<Target = T>;
+
+    fn refc_from_str(s: &str) -> Self::RefC<str>;
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct YesSync;
+#[derive(Clone, Copy, Debug)]
+pub struct NoSync;
+impl Syncable for YesSync {
+    const SYNC: bool = true;
+    type RefC<T: ?Sized> = Arc<T>;
+    fn refc_from_str(s: &str) -> Self::RefC<str> {
+        Arc::from(s)
+    }
+}
+impl Syncable for NoSync {
+    const SYNC: bool = false;
+    type RefC<T: ?Sized> = Rc<T>;
+    fn refc_from_str(s: &str) -> Self::RefC<str> {
+        Rc::from(s)
+    }
+}
+
+impl<'a> Serialize for &'a str {
+    fn serialize_to(&self, buf: &mut BytesMut) {
+        VarInt::<i32>(self.len().try_into().unwrap()).serialize_to(buf);
+        buf.put_slice(self.as_bytes());
+    }
+}
+
+#[derive(Clone, Copy, Deref, DerefMut, Debug, Display)]
+pub struct Json<T>(pub T);
+
+impl<T: serde::Serialize> Serialize for Json<T> {
+    fn serialize_to(&self, buf: &mut BytesMut) {
+        let s = serde_json::to_string(&self.0).expect("json fail");
+        s.as_str().serialize_to(buf);
+    }
+}
+impl<T: for<'de> serde::Deserialize<'de>> Deserialize for Json<T> {
+    fn deserialize<'parse, 'a>(
+        input: Inp<'parse, 'a, Self::Context>,
+    ) -> Resul<'parse, 'a, Self, Self::Context> {
+        let (input, VarInt(length)) = VarInt::<i32>::deserialize(input)?;
+        assert!(length >= 0);
+        let length = length as usize;
+        let slic = input.input.slice(input.offset..input.offset + length);
+        match serde_json::from_slice::<T>(slic) {
+            Ok(j) => Ok((input, Self(j))),
+            Err(e) => Err((input, crate::error::Error::Json(e))),
+        }
     }
 }
