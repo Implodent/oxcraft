@@ -54,7 +54,7 @@ use tokio::{
         TcpListener,
     },
     select,
-    sync::{mpsc, oneshot, RwLock},
+    sync::{oneshot, RwLock},
 };
 
 use crate::model::packets::{
@@ -202,7 +202,10 @@ impl PlayerNet {
             properties: Array::empty(),
         })?;
 
-        let player = Player { name, uuid };
+        let player = Player {
+            name: name.clone(),
+            uuid,
+        };
 
         cx.run_on_main_thread(move |w| {
             let _ = w.world.entity_mut(ent_id).insert(player);
