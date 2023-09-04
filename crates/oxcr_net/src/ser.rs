@@ -77,8 +77,8 @@ impl<'a> Error<&'a str> for crate::error::Error {
         span: Self::Span,
         found: aott::MaybeRef<'_, <&'a str as InputType>::Token>,
     ) -> Self {
-        Self::Ser(
-            <extra::Simple<u8> as aott::error::Error<&'a str>>::expected_eof_found(span, found),
+        Self::SerStr(
+            <extra::Simple<char> as aott::error::Error<&'a str>>::expected_eof_found(span, found),
         )
     }
     fn expected_token_found(
@@ -86,8 +86,8 @@ impl<'a> Error<&'a str> for crate::error::Error {
         expected: Vec<<&'a str as InputType>::Token>,
         found: aott::MaybeRef<'_, <&'a str as InputType>::Token>,
     ) -> Self {
-        Self::Ser(
-            <extra::Simple<u8> as aott::error::Error<&'a str>>::expected_token_found(
+        Self::SerStr(
+            <extra::Simple<char> as aott::error::Error<&'a str>>::expected_token_found(
                 span, expected, found,
             ),
         )
@@ -96,8 +96,8 @@ impl<'a> Error<&'a str> for crate::error::Error {
         span: Self::Span,
         expected: Option<Vec<<&'a str as InputType>::Token>>,
     ) -> Self {
-        Self::Ser(
-            <extra::Simple<u8> as aott::error::Error<&'a str>>::unexpected_eof(span, expected),
+        Self::SerStr(
+            <extra::Simple<char> as aott::error::Error<&'a str>>::unexpected_eof(span, expected),
         )
     }
 }
@@ -207,9 +207,7 @@ impl<const N: usize, Sy: Syncable> Deref for FixedStr<N, Sy> {
 
 pub trait Syncable {
     const SYNC: bool;
-    type RefC<T: ?Sized>: Clone + Deref<Target = T>
-    where
-        Self::RefC<str>: Display;
+    type RefC<T: ?Sized>: Clone + Deref<Target = T> + Sized;
 
     fn refc_from_str(s: &str) -> Self::RefC<str>;
     fn refc_from_slice<T: Clone>(slice: &[T]) -> Self::RefC<[T]>;
@@ -330,7 +328,7 @@ impl Deserialize for Uuid {
         const AMOUNT: usize = 16;
 
         if input.input.len() < input.offset + AMOUNT {
-            let e = Error::unexpected_eof(input.span_since(input.offset), None);
+            let e = Error::<&'a [u8]>::unexpected_eof(input.span_since(input.offset), None);
             return Err((input, e));
         }
 
@@ -385,9 +383,19 @@ impl<T: Clone + Deserialize, Sy: Syncable> Deserialize for Array<T, Sy> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display(fmt = "Identifier({_0}:{_1})")]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Identifier<Sy: Syncable = YesSync>(pub Namespace, pub Sy::RefC<str>);
+impl<Sy: Syncable> std::fmt::Debug for Identifier<Sy> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Identifier({:?}, {:?})", self.0, self.1.deref())
+    }
+}
+impl<Sy: Syncable> Display for Identifier<Sy> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}:{}", self.0, self.1.deref())
+    }
+}
+
 impl<Sy: Syncable> Identifier<Sy> {
     pub fn new(namespace: Namespace, value: &str) -> Self {
         Self(namespace, Sy::refc_from_str(value))
@@ -411,7 +419,7 @@ impl<Sy: Syncable> Identifier<Sy> {
 
 impl<Sy: Syncable> Serialize for Identifier<Sy> {
     fn serialize_to(&self, buf: &mut BytesMut) {
-        let formatted = format!("{}:{}", self.0, self.1);
+        let formatted = format!("{}:{}", self.0, &*self.1);
         formatted.as_str().serialize_to(buf)
     }
 }
@@ -420,14 +428,14 @@ impl<Sy: Syncable> Deserialize for Identifier<Sy> {
         input: Inp<'parse, 'a, Self::Context>,
     ) -> Resul<'parse, 'a, Self, Self::Context> {
         let (input, FixedStr::<32767, Sy> { inner }) = FixedStr::deserialize(input)?;
-        match Self::parse.parse_from(&&inner).into_result() {
+        match Self::parse.parse_from(&inner.deref()).into_result() {
             Ok(ok) => Ok((input, ok)),
             Err(err) => Err((input, err)),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub enum Namespace {
     #[display(fmt = "minecraft")]
     Minecraft,

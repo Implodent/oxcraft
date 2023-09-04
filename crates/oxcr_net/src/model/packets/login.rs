@@ -57,7 +57,6 @@ impl Packet for DisconnectLogin {
 /// Packet ID: 0x02
 /// State: Login
 /// Bound to: client
-///
 /// # Layout
 /// UUID: Uuid
 /// Username: String (16)
