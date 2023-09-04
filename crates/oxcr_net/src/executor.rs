@@ -94,8 +94,8 @@ struct TokioTasksRuntimeInner {
     handle: Handle,
     ticks: Arc<AtomicUsize>,
     update_watch_rx: tokio::sync::watch::Receiver<()>,
-    update_run_tx: tokio::sync::mpsc::UnboundedSender<MainThreadCallback>,
-    update_run_rx: tokio::sync::mpsc::UnboundedReceiver<MainThreadCallback>,
+    update_run_tx: flume::Sender<MainThreadCallback>,
+    update_run_rx: flume::Receiver<MainThreadCallback>,
 }
 
 impl TokioTasksRuntime {
@@ -104,7 +104,7 @@ impl TokioTasksRuntime {
         handle: Handle,
         update_watch_rx: tokio::sync::watch::Receiver<()>,
     ) -> Self {
-        let (update_run_tx, update_run_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (update_run_tx, update_run_rx) = flume::unbounded();
 
         Self(Box::new(TokioTasksRuntimeInner {
             handle,
@@ -170,7 +170,7 @@ pub struct MainThreadContext<'a> {
 #[derive(Clone)]
 pub struct TaskContext {
     update_watch_rx: tokio::sync::watch::Receiver<()>,
-    update_run_tx: tokio::sync::mpsc::UnboundedSender<MainThreadCallback>,
+    update_run_tx: flume::Sender<MainThreadCallback>,
     ticks: Arc<AtomicUsize>,
 }
 
@@ -201,7 +201,7 @@ impl TaskContext {
     /// main Bevy [`World`], allowing it to update any resources or entities that it wants. The callback can
     /// report results back to the background thread by returning an output value, which will then be returned from
     /// this async function once the callback runs.
-    pub async fn run_on_main_thread<Runnable, Output>(&mut self, runnable: Runnable) -> Output
+    pub async fn run_on_main_thread<Runnable, Output>(&self, runnable: Runnable) -> Output
     where
         Runnable: FnOnce(MainThreadContext) -> Output + Send + 'static,
         Output: Send + 'static,

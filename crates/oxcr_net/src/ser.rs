@@ -1,10 +1,12 @@
 use derive_more::*;
 use std::{
+    fmt::Debug,
     marker::PhantomData,
     ops::{Deref, Range},
     rc::Rc,
     sync::Arc,
 };
+use uuid::Uuid;
 
 use crate::model::{LEB128Number, VarInt};
 use ::bytes::{BufMut, BytesMut};
@@ -112,7 +114,7 @@ impl<const N: usize, Sy: Syncable> Deserialize for FixedStr<N, Sy> {
         input: Inp<'parse, 'a, Self::Context>,
     ) -> Resul<'parse, 'a, Self, Self::Context> {
         // get length, must be 0 <= length <= N
-        let (input, VarInt(length)) = VarInt::<i32>::deserialize(input)?;
+        let (mut input, VarInt(length)) = VarInt::<i32>::deserialize(input)?;
         debug!(%length, expected_length=%N, "[fixedstr] checking length");
         assert!(length >= 0);
         let length = length as usize;
@@ -120,6 +122,8 @@ impl<const N: usize, Sy: Syncable> Deserialize for FixedStr<N, Sy> {
         let string =
             std::str::from_utf8(input.input.slice((input.offset)..(input.offset + length)))
                 .expect("invalid utf8. that's a skill issue ngl");
+        input.offset += length;
+
         // SAFETY: checked length being <= N, can unwrap_unchecked here.
         Ok((input, unsafe {
             FixedStr::from_string(string).unwrap_unchecked()
@@ -143,7 +147,7 @@ pub struct FixedStr<const N: usize, Sy: Syncable = YesSync> {
 }
 impl<const N: usize, Sy: Syncable> std::fmt::Display for FixedStr<N, Sy> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.inner.fmt(f)
+        std::fmt::Display::fmt(self.inner.deref(), f)
     }
 }
 impl<const N: usize, Sy: Syncable> FixedStr<N, Sy> {
@@ -171,6 +175,8 @@ pub trait Syncable {
     type RefC<T: ?Sized>: Clone + Deref<Target = T>;
 
     fn refc_from_str(s: &str) -> Self::RefC<str>;
+    fn refc_from_slice<T: Clone>(slice: &[T]) -> Self::RefC<[T]>;
+    fn refc_from_iter<T: Clone>(iter: impl IntoIterator<Item = T>) -> Self::RefC<[T]>;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -183,12 +189,24 @@ impl Syncable for YesSync {
     fn refc_from_str(s: &str) -> Self::RefC<str> {
         Arc::from(s)
     }
+    fn refc_from_slice<T: Clone>(slice: &[T]) -> Self::RefC<[T]> {
+        Arc::from(slice)
+    }
+    fn refc_from_iter<T: Clone>(iter: impl IntoIterator<Item = T>) -> Self::RefC<[T]> {
+        Arc::from_iter(iter)
+    }
 }
 impl Syncable for NoSync {
     const SYNC: bool = false;
     type RefC<T: ?Sized> = Rc<T>;
     fn refc_from_str(s: &str) -> Self::RefC<str> {
         Rc::from(s)
+    }
+    fn refc_from_slice<T: Clone>(slice: &[T]) -> Self::RefC<[T]> {
+        Rc::from(slice)
+    }
+    fn refc_from_iter<T: Clone>(iter: impl IntoIterator<Item = T>) -> Self::RefC<[T]> {
+        Rc::from_iter(iter)
     }
 }
 
@@ -199,8 +217,18 @@ impl<'a> Serialize for &'a str {
     }
 }
 
-#[derive(Clone, Copy, Deref, DerefMut, Debug, Display)]
+#[derive(Clone, Copy, Deref, DerefMut, Display)]
 pub struct Json<T>(pub T);
+impl<T: Debug + serde::Serialize> Debug for Json<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Json({:?}) = {}",
+            self.0,
+            serde_json::to_string_pretty(&self.0).unwrap()
+        )
+    }
+}
 
 impl<T: serde::Serialize> Serialize for Json<T> {
     fn serialize_to(&self, buf: &mut BytesMut) {
@@ -208,6 +236,7 @@ impl<T: serde::Serialize> Serialize for Json<T> {
         s.as_str().serialize_to(buf);
     }
 }
+
 impl<T: for<'de> serde::Deserialize<'de>> Deserialize for Json<T> {
     fn deserialize<'parse, 'a>(
         input: Inp<'parse, 'a, Self::Context>,
@@ -220,5 +249,101 @@ impl<T: for<'de> serde::Deserialize<'de>> Deserialize for Json<T> {
             Ok(j) => Ok((input, Self(j))),
             Err(e) => Err((input, crate::error::Error::Json(e))),
         }
+    }
+}
+
+impl<T: Deserialize> Deserialize for Option<T> {
+    type Context = T::Context;
+
+    fn deserialize<'parse, 'a>(
+        input: Inp<'parse, 'a, Self::Context>,
+    ) -> Resul<'parse, 'a, Self, Self::Context> {
+        let (input, exists) = one_of([0x0, 0x1]).map(|t| t == 0x1).parse(input)?;
+        if exists {
+            let (input, value) = T::deserialize(input)?;
+            Ok((input, Some(value)))
+        } else {
+            Ok((input, None))
+        }
+    }
+}
+
+impl<T: Serialize> Serialize for Option<T> {
+    fn serialize_to(&self, buf: &mut BytesMut) {
+        match self {
+            Some(val) => {
+                buf.put_u8(0x1);
+                val.serialize_to(buf)
+            }
+            None => buf.put_u8(0x0),
+        }
+    }
+}
+
+impl Serialize for Uuid {
+    fn serialize_to(&self, buf: &mut BytesMut) {
+        buf.put_u128(self.as_u128())
+    }
+}
+
+impl Deserialize for Uuid {
+    fn deserialize<'parse, 'a>(
+        mut input: Inp<'parse, 'a, Self::Context>,
+    ) -> Resul<'parse, 'a, Self, Self::Context> {
+        const AMOUNT: usize = 16;
+
+        if input.input.len() < input.offset + AMOUNT {
+            let e = Error::unexpected_eof(input.span_since(input.offset), None);
+            return Err((input, e));
+        }
+
+        let bytes = input.input.slice(input.offset..input.offset + AMOUNT);
+        input.offset += AMOUNT;
+
+        Ok((input, Self::from_slice(bytes).unwrap()))
+    }
+}
+
+#[derive(Debug, Deref)]
+#[deref(forward)]
+pub struct Array<T: Clone, Sy: Syncable = YesSync>(Sy::RefC<[T]>);
+
+impl<T: Clone, Sy: Syncable> Array<T, Sy> {
+    pub fn empty() -> Self {
+        Self(Sy::refc_from_slice(&[]))
+    }
+    pub fn new(slice: &[T]) -> Self {
+        Self(Sy::refc_from_slice(slice))
+    }
+}
+
+impl<T: Clone + Serialize, Sy: Syncable> Serialize for Array<T, Sy> {
+    fn serialize_to(&self, buf: &mut BytesMut) {
+        VarInt::<i32>(self.len().try_into().unwrap()).serialize_to(buf);
+        for item in self.iter() {
+            item.serialize_to(buf);
+        }
+    }
+}
+
+impl<T: Clone, Sy: Syncable> FromIterator<T> for Array<T, Sy> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self(Sy::refc_from_iter(iter))
+    }
+}
+
+impl<T: Clone + Deserialize, Sy: Syncable> Deserialize for Array<T, Sy> {
+    type Context = <T as Deserialize>::Context;
+    fn deserialize<'parse, 'a>(
+        input: Inp<'parse, 'a, Self::Context>,
+    ) -> Resul<'parse, 'a, Self, Self::Context> {
+        let (input, VarInt::<i32>(length)) = deser_cx(input)?;
+        assert!(length >= 0);
+        let length = length as usize;
+
+        T::deserialize
+            .repeated_custom::<Self>()
+            .exactly(length)
+            .parse(input)
     }
 }

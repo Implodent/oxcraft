@@ -9,6 +9,7 @@ use serde_derive::{Deserialize, Serialize};
 
 use super::{Packet, PacketContext};
 
+#[derive(Debug)]
 pub struct StatusRequest;
 impl Deserialize for StatusRequest {
     type Context = PacketContext;
@@ -28,9 +29,11 @@ impl Packet for StatusRequest {
     const STATE: crate::model::State = State::Status;
 }
 
+#[derive(Debug)]
 pub struct StatusResponse {
     pub json_response: Json<StatusResponseJson>,
 }
+
 impl Packet for StatusResponse {
     const ID: crate::model::VarInt = VarInt(0x00);
     const STATE: crate::model::State = State::Status;
@@ -75,12 +78,7 @@ pub struct Sample {
     pub id: String,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Description {
-    pub text: String,
-}
-
+#[derive(Debug)]
 pub struct PingRequest {
     pub payload: i64,
 }
@@ -100,6 +98,7 @@ impl Deserialize for PingRequest {
     }
 }
 
+#[derive(Debug)]
 pub struct PongResponse {
     pub payload: i64,
 }

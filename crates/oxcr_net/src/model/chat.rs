@@ -3,10 +3,13 @@ use serde::{Deserialize, Serialize};
 use super::item::ItemData;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum ChatComponent {
     Normal(BasicChatComponent),
     String(ChatStringComponent),
+    Multi(Vec<ChatComponent>),
 }
+
 impl Default for ChatComponent {
     fn default() -> Self {
         Self::String(ChatStringComponent::default())
@@ -39,15 +42,17 @@ pub struct BasicChatComponent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hover_event: Option<Box<ChatHoverEvent>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub extra: Vec<Box<ChatComponent>>,
+    pub extra: Vec<ChatComponent>,
 }
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum ChatColor {
     Named(ChatColorNamed),
     ShortCode(ChatShortCode),
     Web(ChatColorWeb),
     #[default]
+    #[serde(rename = "reset")]
     Reset,
 }
 
@@ -57,11 +62,30 @@ pub enum ChatShortCode {
     White,
     #[serde(rename = "a")]
     Green,
+    #[serde(rename = "0")]
+    Black,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ChatColorNamed {}
+pub enum ChatColorNamed {
+    Black,
+    DarkBlue,
+    DarkGren,
+    DarkCyan,
+    DarkRed,
+    Purple,
+    Gold,
+    Gray,
+    DarkGray,
+    Blue,
+    Green,
+    Aqua,
+    Red,
+    LightPurple,
+    Yellow,
+    White,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatColorWeb {
@@ -83,4 +107,24 @@ pub enum ChatClickEvent {
 pub enum ChatHoverEvent {
     ShowText(ChatComponent),
     ShowItem(ItemData),
+}
+
+#[macro_export]
+macro_rules! chat {
+    // "hello"(bold = true, italic = true)
+    (string {
+        $($field:ident: $value:expr,)*
+        $str:expr
+    }) => {
+        $crate::model::chat::ChatComponent::String($crate::model::chat::ChatStringComponent {
+            text: String::from($str),
+            basic: $crate::model::chat::BasicChatComponent {
+                $($field: $value,)*
+                ..Default::default()
+            }
+        })
+    };
+    (multi { $($what:tt),+ }) => {
+        $crate::model::chat::ChatComponent::Multi(vec![$(chat!($what),)*])
+    };
 }

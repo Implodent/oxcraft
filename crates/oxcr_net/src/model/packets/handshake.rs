@@ -33,10 +33,7 @@ impl Deserialize for Handshake {
         let (input, addr) = deser_cx(input)?;
         let (input, port) = b::number::big::u16(input)?;
         let offs = input.input.len();
-        let next_state = match input.input.slice_from(input.offset..).last().copied() {
-            Some(next) => next,
-            None => return Err((input, crate::error::Error::unexpected_eof(offs..offs, None))),
-        };
+        let (input, VarInt(next_state)) = deser_cx(input)?;
 
         Ok((
             input,

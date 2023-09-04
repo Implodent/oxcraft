@@ -1,15 +1,16 @@
 use crate::error::Error;
 use ::bytes::{BufMut, Bytes, BytesMut};
-use aott::input::SliceInput;
 use aott::prelude::*;
 
 use crate::ser::*;
 
 use self::handshake::Handshake;
 
-use super::{LEB128Number, VarInt};
+use super::VarInt;
 
 pub mod handshake;
+pub mod login;
+pub mod play;
 pub mod status;
 
 #[derive(Debug, Clone)]
@@ -33,6 +34,7 @@ impl Deserialize for PacketServerbound {
     }
 }
 
+#[derive(Debug)]
 pub struct PacketContext {
     pub id: VarInt<i32>,
     pub state: super::State,
