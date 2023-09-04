@@ -4,7 +4,6 @@ use crate::{
 };
 use aott::{
     bytes as b,
-    prelude::{Error, SliceInput},
 };
 
 use super::{Packet, PacketContext};
@@ -32,7 +31,7 @@ impl Deserialize for Handshake {
         let (input, protocol_version) = deser_cx(input)?;
         let (input, addr) = deser_cx(input)?;
         let (input, port) = b::number::big::u16(input)?;
-        let offs = input.input.len();
+        let _offs = input.input.len();
         let (input, VarInt(next_state)) = deser_cx(input)?;
 
         Ok((

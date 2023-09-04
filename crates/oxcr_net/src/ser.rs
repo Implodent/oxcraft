@@ -8,7 +8,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::model::{LEB128Number, VarInt};
+use crate::model::{VarInt};
 use ::bytes::{BufMut, BytesMut};
 use aott::prelude::*;
 use tracing::debug;

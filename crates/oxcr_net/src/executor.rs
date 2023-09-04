@@ -6,7 +6,7 @@ use bevy::app::{App, Plugin, Update};
 use bevy::ecs::{prelude::World, system::Resource};
 
 use tokio::runtime::Handle;
-use tokio::{runtime::Runtime, task::JoinHandle};
+use tokio::{task::JoinHandle};
 
 /// An internal struct keeping track of how many ticks have elapsed since the start of the program.
 #[derive(Resource)]
