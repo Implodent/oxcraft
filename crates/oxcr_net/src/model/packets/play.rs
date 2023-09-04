@@ -1,6 +1,6 @@
 use crate::{
-    model::{chat::ChatComponent, State, VarInt},
-    ser::{Json, Serialize},
+    model::{chat::ChatComponent, player::*, State, VarInt},
+    ser::{Array, Identifier, Json, Serialize},
 };
 
 use super::Packet;
@@ -19,4 +19,13 @@ impl Serialize for DisconnectPlay {
     fn serialize_to(&self, buf: &mut bytes::BytesMut) {
         self.reason.serialize_to(buf);
     }
+}
+
+#[derive(Debug)]
+pub struct LoginPlay {
+    pub entity_id: i32,
+    pub is_hardcore: bool,
+    pub game_mode: GameMode,
+    pub prev_game_mode: PreviousGameMode,
+    pub dimension_names: Array<Identifier>,
 }

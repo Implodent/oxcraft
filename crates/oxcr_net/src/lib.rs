@@ -35,7 +35,7 @@ use uuid::Uuid;
 
 use executor::*;
 use model::{
-    chat::{ChatColor, ChatComponent, ChatStringComponent},
+    chat::{BasicChatComponent, ChatColor, ChatComponent, ChatStringComponent},
     packets::{
         handshake::Handshake,
         login::LoginStart,
@@ -57,10 +57,13 @@ use tokio::{
     sync::{oneshot, RwLock},
 };
 
-use crate::model::packets::{
-    handshake::HandshakeNextState,
-    login::{DisconnectLogin, LoginSuccess},
-    play::DisconnectPlay,
+use crate::model::{
+    packets::{
+        handshake::HandshakeNextState,
+        login::{DisconnectLogin, LoginSuccess},
+        play::DisconnectPlay,
+    },
+    player::Player,
 };
 
 #[derive(Debug)]
@@ -74,12 +77,6 @@ pub struct PlayerNet {
 #[derive(Component, Deref, Debug)]
 #[deref(forward)]
 pub struct PlayerN(pub Arc<PlayerNet>);
-
-#[derive(Component, Debug)]
-pub struct Player {
-    pub name: FixedStr<16, YesSync>,
-    pub uuid: Uuid,
-}
 
 unsafe impl Send for PlayerNet {}
 unsafe impl Sync for PlayerNet {}
@@ -188,7 +185,9 @@ impl PlayerNet {
         rwlock_set(&self.state, State::Login).await;
 
         let LoginStart { name, uuid } = self.recv_packet().await?;
+
         debug!(login.name=?name, login.uuid=?uuid, %self.addr, "Login");
+
         let uuid = uuid.unwrap_or_else(|| {
             let real = format!("OfflinePlayer:{name}");
             Uuid::new_v3(&Uuid::NAMESPACE_DNS, real.as_bytes())
@@ -205,6 +204,7 @@ impl PlayerNet {
         let player = Player {
             name: name.clone(),
             uuid,
+            game_mode: model::player::GameMode::Survival,
         };
 
         cx.run_on_main_thread(move |w| {
@@ -226,16 +226,24 @@ impl PlayerNet {
                     name: String::from("Implodent"),
                     protocol: model::PROTOCOL_VERSION,
                 },
-                description: model::chat::ChatComponent::Multi(vec![ChatComponent::String(
-                    ChatStringComponent {
-                        text: "help".into(),
+                description: model::chat::ChatComponent::Multi(vec![
+                    ChatComponent::String(ChatStringComponent {
+                        text: "help\n".into(),
                         basic: model::chat::BasicChatComponent {
                             bold: true,
                             color: Some(ChatColor::Named(model::chat::ChatColorNamed::Aqua)),
                             ..Default::default()
                         },
-                    },
-                )]),
+                    }),
+                    ChatComponent::String(ChatStringComponent {
+                        text: "help please".into(),
+                        basic: BasicChatComponent {
+                            italic: true,
+                            color: Some(ChatColor::Named(model::chat::ChatColorNamed::Gold)),
+                            ..Default::default()
+                        },
+                    }),
+                ]),
                 players: Players {
                     max: -1,
                     online: 747106,

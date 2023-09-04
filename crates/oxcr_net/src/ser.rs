@@ -1,6 +1,7 @@
 use derive_more::*;
 use std::{
-    fmt::Debug,
+    borrow::Cow,
+    fmt::{Debug, Display},
     marker::PhantomData,
     ops::{Deref, Range},
     rc::Rc,
@@ -8,7 +9,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::model::{VarInt};
+use crate::model::VarInt;
 use ::bytes::{BufMut, BytesMut};
 use aott::prelude::*;
 use tracing::debug;
@@ -63,6 +64,40 @@ impl<'a> Error<&'a [u8]> for crate::error::Error {
     ) -> Self {
         Self::Ser(
             <extra::Simple<u8> as aott::error::Error<&'a [u8]>>::unexpected_eof(span, expected),
+        )
+    }
+}
+impl<'a, C> ParserExtras<&'a str> for Extra<C> {
+    type Context = C;
+    type Error = crate::error::Error;
+}
+impl<'a> Error<&'a str> for crate::error::Error {
+    type Span = Range<usize>;
+    fn expected_eof_found(
+        span: Self::Span,
+        found: aott::MaybeRef<'_, <&'a str as InputType>::Token>,
+    ) -> Self {
+        Self::Ser(
+            <extra::Simple<u8> as aott::error::Error<&'a str>>::expected_eof_found(span, found),
+        )
+    }
+    fn expected_token_found(
+        span: Self::Span,
+        expected: Vec<<&'a str as InputType>::Token>,
+        found: aott::MaybeRef<'_, <&'a str as InputType>::Token>,
+    ) -> Self {
+        Self::Ser(
+            <extra::Simple<u8> as aott::error::Error<&'a str>>::expected_token_found(
+                span, expected, found,
+            ),
+        )
+    }
+    fn unexpected_eof(
+        span: Self::Span,
+        expected: Option<Vec<<&'a str as InputType>::Token>>,
+    ) -> Self {
+        Self::Ser(
+            <extra::Simple<u8> as aott::error::Error<&'a str>>::unexpected_eof(span, expected),
         )
     }
 }
@@ -172,7 +207,9 @@ impl<const N: usize, Sy: Syncable> Deref for FixedStr<N, Sy> {
 
 pub trait Syncable {
     const SYNC: bool;
-    type RefC<T: ?Sized>: Clone + Deref<Target = T>;
+    type RefC<T: ?Sized>: Clone + Deref<Target = T>
+    where
+        Self::RefC<str>: Display;
 
     fn refc_from_str(s: &str) -> Self::RefC<str>;
     fn refc_from_slice<T: Clone>(slice: &[T]) -> Self::RefC<[T]>;
@@ -346,4 +383,54 @@ impl<T: Clone + Deserialize, Sy: Syncable> Deserialize for Array<T, Sy> {
             .exactly(length)
             .parse(input)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display(fmt = "Identifier({_0}:{_1})")]
+pub struct Identifier<Sy: Syncable = YesSync>(pub Namespace, pub Sy::RefC<str>);
+impl<Sy: Syncable> Identifier<Sy> {
+    pub fn new(namespace: Namespace, value: &str) -> Self {
+        Self(namespace, Sy::refc_from_str(value))
+    }
+
+    fn parse<'parse, 'a>(
+        input: aott::input::Input<'parse, &'a str, Extra<()>>,
+    ) -> aott::error::IResult<'parse, &'a str, Extra<()>, Self> {
+        tuple((
+            aott::text::ascii::ident.map(|namespace| match namespace {
+                "minecraft" => Namespace::Minecraft,
+                anything_else => Namespace::Custom(Cow::Owned(anything_else.to_owned())),
+            }),
+            just(":").ignored(),
+            aott::text::ascii::ident.map(Sy::refc_from_str),
+        ))
+        .map(|(namespace, (), value)| Self(namespace, value))
+        .parse(input)
+    }
+}
+
+impl<Sy: Syncable> Serialize for Identifier<Sy> {
+    fn serialize_to(&self, buf: &mut BytesMut) {
+        let formatted = format!("{}:{}", self.0, self.1);
+        formatted.as_str().serialize_to(buf)
+    }
+}
+impl<Sy: Syncable> Deserialize for Identifier<Sy> {
+    fn deserialize<'parse, 'a>(
+        input: Inp<'parse, 'a, Self::Context>,
+    ) -> Resul<'parse, 'a, Self, Self::Context> {
+        let (input, FixedStr::<32767, Sy> { inner }) = FixedStr::deserialize(input)?;
+        match Self::parse.parse_from(&&inner).into_result() {
+            Ok(ok) => Ok((input, ok)),
+            Err(err) => Err((input, err)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
+pub enum Namespace {
+    #[display(fmt = "minecraft")]
+    Minecraft,
+    #[display(fmt = "{_0}")]
+    Custom(Cow<'static, str>),
 }

@@ -10,6 +10,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Serialization error: {_0:?}")]
     Ser(aott::extra::Simple<u8>),
+    #[error("Serialization error: {_0:?}")]
+    SerStr(aott::extra::Simple<char>),
     #[error("Invalid packet ID: {_0}")]
     InvalidPacketId(i32),
     #[error("Packet send error: {_0:?}")]
