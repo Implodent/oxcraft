@@ -1,4 +1,4 @@
-use std::str::Utf8Error;
+use std::{str::Utf8Error, string::FromUtf8Error};
 
 use crate::model::packets::SerializedPacket;
 
@@ -20,8 +20,12 @@ pub enum Error {
     Recv(#[from] flume::RecvError),
     #[error("Invalid UTF-8 encountered: {_0}")]
     InvalidUtf8(#[from] Utf8Error),
+    #[error("Invalid UTF-8 encountered: {_0}")]
+    InvalidUtf8Str(#[from] FromUtf8Error),
     #[error("VarInt too big")]
     VarIntTooBig,
+    #[error("Invalid state ID: {_0}")]
+    InvalidStateId(i32),
     #[error("JSON error: {_0}")]
     Json(#[from] serde_json::Error),
 }

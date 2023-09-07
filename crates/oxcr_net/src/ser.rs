@@ -12,7 +12,9 @@ use uuid::Uuid;
 
 use crate::model::VarInt;
 use ::bytes::{BufMut, BytesMut};
-use aott::prelude::*;
+pub use aott::prelude::parser;
+pub use aott::prelude::Parser;
+use aott::{pfn_type, prelude::*};
 use tracing::debug;
 
 pub trait Deserialize: Sized {
@@ -107,11 +109,52 @@ pub type Resul<'a, T, C = ()> = PResult<&'a [u8], T, Extra<C>>;
 
 #[parser(extras = "Extra<C>")]
 pub fn deser_cx<T: Deserialize<Context = ()>, C>(input: &[u8]) -> T {
-    T::deserialize(&mut Input {
-        offset: input.offset,
-        input: input.input,
-        cx: &(),
-    })
+    no_context(T::deserialize)(input)
+}
+
+pub fn no_context<
+    I: InputType,
+    O,
+    E: ParserExtras<I, Context = ()>,
+    EE: ParserExtras<I, Context = C, Error = E::Error>,
+    C,
+    P: Parser<I, O, E>,
+>(
+    parser: P,
+) -> pfn_type!(I, O, EE) {
+    move |input| {
+        let mut inp = Input {
+            offset: input.offset,
+            input: input.input,
+            cx: &(),
+        };
+        let value = parser.parse_with(&mut inp)?;
+        input.offset = inp.offset;
+        Ok(value)
+    }
+}
+pub fn with_context<
+    I: InputType,
+    O,
+    E: ParserExtras<I, Context = C2>,
+    EE: ParserExtras<I, Context = C1, Error = E::Error>,
+    C1,
+    C2,
+    P: Parser<I, O, E>,
+>(
+    parser: P,
+    context: C2,
+) -> pfn_type!(I, O, EE) {
+    move |input| {
+        let mut inp = Input {
+            offset: input.offset,
+            input: input.input,
+            cx: &context,
+        };
+        let value = parser.parse_with(&mut inp)?;
+        input.offset = inp.offset;
+        Ok(value)
+    }
 }
 
 pub fn seri<T: Serialize>(t: &T) -> ::bytes::Bytes {
@@ -348,7 +391,7 @@ impl<T: Clone + Deserialize, Sy: Syncable> Deserialize for Array<T, Sy> {
     #[parser(extras = "Extra<Self::Context>")]
     fn deserialize(input: &[u8]) -> Self {
         let VarInt::<i32>(length) = deser_cx(input)?;
-        assert!(length >= 0);
+        debug_assert!(length >= 0);
         let length = length as usize;
 
         T::deserialize
@@ -412,3 +455,87 @@ pub enum Namespace {
     #[display(fmt = "{_0}")]
     Custom(Cow<'static, str>),
 }
+
+pub trait Endian {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Big;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Little;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Native;
+
+impl Endian for Big {}
+impl Endian for Little {}
+impl Endian for Native {}
+
+/// A type for serializing and deserializing numbers from bytes.
+/// # Examples
+/// ```
+/// # use aott::prelude::*;
+/// # use aott::ser::*;
+/// assert_eq!(deserialize_from::<_, extra::Err<&[u8]>, _>(&[0x63][..]), Ok(Number(99u8, Big)));
+/// ```
+#[derive(Copy, Clone, Deref, DerefMut, Debug, Display, PartialEq, Eq)]
+#[display(bound = "N: core::fmt::Display")]
+#[display(fmt = "{_0}")]
+pub struct Number<N, E: Endian>(
+    #[deref]
+    #[deref_mut]
+    pub N,
+    pub E,
+);
+
+macro_rules! number_impl {
+        ($($num:ty)*) => {
+                $(
+                impl Deserialize
+                        for Number<$num, Big>
+                {
+                        fn deserialize<'a>(input: &mut Input<&'a [u8], Extra<()>>) -> PResult<&'a [u8], Self, Extra<()>>
+                        where
+                                Self: Sized,
+                        {
+                                Ok(Self(
+                                        <$num>::from_be_bytes(
+                                                take_exact::<{ core::mem::size_of::<$num>() }>()
+                                                        .parse_with(input)?,
+                                        ),
+                                        Big,
+                                ))
+                        }
+                }
+                impl Deserialize
+                        for Number<$num, Little>
+                {
+                        fn deserialize<'a>(input: &mut Input<&'a [u8], Extra<()>>) -> PResult<&'a [u8], Self, Extra<()>>
+                        where
+                                Self: Sized,
+                        {
+                                Ok(Self(
+                                        <$num>::from_le_bytes(
+                                                take_exact::<{ core::mem::size_of::<$num>() }>()
+                                                        .parse_with(input)?,
+                                        ),
+                                        Little,
+                                ))
+                        }
+                }
+                impl Deserialize for $num {
+                    fn deserialize<'a>(input: &mut Input<&'a [u8], Extra<()>>) -> PResult<&'a [u8], Self, Extra<()>>
+                    where
+                            Self: Sized,
+                    {
+                            Ok(
+                                    <$num>::from_be_bytes(
+                                            take_exact::<{ core::mem::size_of::<$num>() }>()
+                                                    .parse_with(input)?,
+                                    ),
+                            )
+                    }
+                }
+            )*
+        };
+}
+
+number_impl![u8 u16 u32 u64 u128 i8 i16 i32 i64 i128 f32 f64];

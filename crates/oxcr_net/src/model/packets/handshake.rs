@@ -1,4 +1,5 @@
 use crate::{
+    error::Error,
     model::{State, VarInt},
     ser::*,
 };
@@ -28,7 +29,6 @@ impl Deserialize for Handshake {
         let protocol_version = deser_cx(input)?;
         let addr = deser_cx(input)?;
         let port = b::number::big::u16(input)?;
-        let _offs = input.input.len();
         let VarInt(next_state) = deser_cx(input)?;
 
         Ok(Self {
@@ -38,7 +38,7 @@ impl Deserialize for Handshake {
             next_state: match next_state {
                 1 => HandshakeNextState::Status,
                 2 => HandshakeNextState::Login,
-                s => panic!("Invalid NextState: {s}"),
+                s => return Err(Error::InvalidStateId(s)),
             },
         })
     }

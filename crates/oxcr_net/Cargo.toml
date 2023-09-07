@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 bevy.workspace = true
 tokio.workspace = true
-bincode.workspace = true
 derive_more.workspace = true
 chashmap = "2.2.2"
 tracing.workspace = true

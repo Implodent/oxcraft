@@ -59,7 +59,7 @@ checksum = "5ecc8056bf6ab9892dcd53216c83d1597487d7dacac16c8df6b877d127df9937"
 [[package]]
 name = "aott"
 version = "0.3.0"
-source = "git+https://github.com/Implodent/AOTT.git?branch=w0.3#810f01f2bfb50d015a83fe8e431fb2aa3508212b"
+source = "git+https://github.com/Implodent/AOTT.git?branch=w0.3#17c221a2fe6e142707a41f48cac8ffe5428398b3"
 dependencies = [
  "aott_derive",
  "bytes",
@@ -72,7 +72,7 @@ dependencies = [
 [[package]]
 name = "aott_derive"
 version = "0.3.0"
-source = "git+https://github.com/Implodent/AOTT.git?branch=w0.3#810f01f2bfb50d015a83fe8e431fb2aa3508212b"
+source = "git+https://github.com/Implodent/AOTT.git?branch=w0.3#17c221a2fe6e142707a41f48cac8ffe5428398b3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -466,15 +466,6 @@ dependencies = [
  "bevy_reflect",
  "bevy_utils",
  "raw-window-handle",
-]
-
-[[package]]
-name = "bincode"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -983,7 +974,6 @@ version = "0.1.0"
 dependencies = [
  "aott",
  "bevy",
- "bincode",
  "bytes",
  "chashmap",
  "derive_more",
