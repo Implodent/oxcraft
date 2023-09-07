@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use derive_more::*;
 use std::{
     borrow::Cow,
@@ -17,9 +18,9 @@ use tracing::debug;
 pub trait Deserialize: Sized {
     type Context = ();
 
-    fn deserialize<'parse, 'a>(
-        input: Inp<'parse, 'a, Self::Context>,
-    ) -> Resul<'parse, 'a, Self, Self::Context>;
+    fn deserialize<'a>(
+        input: &mut Input<&'a [u8], Extra<Self::Context>>,
+    ) -> PResult<&'a [u8], Self, Extra<Self::Context>>;
 }
 
 pub trait Serialize {
@@ -102,34 +103,15 @@ impl<'a> Error<&'a str> for crate::error::Error {
     }
 }
 
-pub type Inp<'parse, 'a, C = ()> = Input<'parse, &'a [u8], Extra<C>>;
-pub type Resul<'parse, 'a, T, C = ()> = IResult<'parse, &'a [u8], Extra<C>, T>;
+pub type Resul<'a, T, C = ()> = PResult<&'a [u8], T, Extra<C>>;
 
-pub fn deser<'parse, 'a, T: Deserialize>(
-    input: Inp<'parse, 'a, T::Context>,
-) -> Resul<'parse, 'a, T, T::Context> {
-    T::deserialize(input)
-}
-
-pub fn deser_cx<'parse, 'a, T: Deserialize<Context = ()>, C>(
-    input: Inp<'parse, 'a, C>,
-) -> Resul<'parse, 'a, T, C> {
-    let cx = input.context();
-    let (inp, res) = T::deserialize(Input {
+#[parser(extras = "Extra<C>")]
+pub fn deser_cx<T: Deserialize<Context = ()>, C>(input: &[u8]) -> T {
+    T::deserialize(&mut Input {
         offset: input.offset,
         input: input.input,
         cx: &(),
     })
-    .map_or_else(|(inp, e)| (inp, Err(e)), |(inp, ok)| (inp, Ok(ok)));
-    let next_inp = Input {
-        offset: inp.offset,
-        input: inp.input,
-        cx,
-    };
-    match res {
-        Ok(ok) => Ok((next_inp, ok)),
-        Err(e) => Err((next_inp, e)),
-    }
 }
 
 pub fn seri<T: Serialize>(t: &T) -> ::bytes::Bytes {
@@ -138,18 +120,16 @@ pub fn seri<T: Serialize>(t: &T) -> ::bytes::Bytes {
 
 #[parser(extras = E)]
 pub fn slice_till_end<'a, I: SliceInput<'a>, E: ParserExtras<I>>(input: I) -> I::Slice {
-    let slice = input.input.slice_from(input.offset..);
-    Ok((input, slice))
+    Ok(input.input.slice_from(input.offset..))
 }
 
 impl<const N: usize, Sy: Syncable> Deserialize for FixedStr<N, Sy> {
     type Context = ();
 
-    fn deserialize<'parse, 'a>(
-        input: Inp<'parse, 'a, Self::Context>,
-    ) -> Resul<'parse, 'a, Self, Self::Context> {
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(input: &[u8]) -> Self {
         // get length, must be 0 <= length <= N
-        let (mut input, VarInt(length)) = VarInt::<i32>::deserialize(input)?;
+        let VarInt(length) = VarInt::<i32>::deserialize(input)?;
         debug!(%length, expected_length=%N, "[fixedstr] checking length");
         assert!(length >= 0);
         let length = length as usize;
@@ -160,9 +140,7 @@ impl<const N: usize, Sy: Syncable> Deserialize for FixedStr<N, Sy> {
         input.offset += length;
 
         // SAFETY: checked length being <= N, can unwrap_unchecked here.
-        Ok((input, unsafe {
-            FixedStr::from_string(string).unwrap_unchecked()
-        }))
+        Ok(unsafe { FixedStr::from_string(string).unwrap_unchecked() })
     }
 }
 
@@ -273,16 +251,15 @@ impl<T: serde::Serialize> Serialize for Json<T> {
 }
 
 impl<T: for<'de> serde::Deserialize<'de>> Deserialize for Json<T> {
-    fn deserialize<'parse, 'a>(
-        input: Inp<'parse, 'a, Self::Context>,
-    ) -> Resul<'parse, 'a, Self, Self::Context> {
-        let (input, VarInt(length)) = VarInt::<i32>::deserialize(input)?;
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(input: &[u8]) -> Self {
+        let VarInt(length) = VarInt::<i32>::deserialize(input)?;
         assert!(length >= 0);
         let length = length as usize;
         let slic = input.input.slice(input.offset..input.offset + length);
         match serde_json::from_slice::<T>(slic) {
-            Ok(j) => Ok((input, Self(j))),
-            Err(e) => Err((input, crate::error::Error::Json(e))),
+            Ok(j) => Ok(Self(j)),
+            Err(e) => Err(crate::error::Error::Json(e)),
         }
     }
 }
@@ -290,15 +267,14 @@ impl<T: for<'de> serde::Deserialize<'de>> Deserialize for Json<T> {
 impl<T: Deserialize> Deserialize for Option<T> {
     type Context = T::Context;
 
-    fn deserialize<'parse, 'a>(
-        input: Inp<'parse, 'a, Self::Context>,
-    ) -> Resul<'parse, 'a, Self, Self::Context> {
-        let (input, exists) = one_of([0x0, 0x1]).map(|t| t == 0x1).parse(input)?;
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(input: &[u8]) -> Self {
+        let exists = one_of([0x0, 0x1]).map(|t| t == 0x1).parse_with(input)?;
         if exists {
-            let (input, value) = T::deserialize(input)?;
-            Ok((input, Some(value)))
+            let value = T::deserialize(input)?;
+            Ok(Some(value))
         } else {
-            Ok((input, None))
+            Ok(None)
         }
     }
 }
@@ -322,20 +298,19 @@ impl Serialize for Uuid {
 }
 
 impl Deserialize for Uuid {
-    fn deserialize<'parse, 'a>(
-        mut input: Inp<'parse, 'a, Self::Context>,
-    ) -> Resul<'parse, 'a, Self, Self::Context> {
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(input: &[u8]) -> Self {
         const AMOUNT: usize = 16;
 
         if input.input.len() < input.offset + AMOUNT {
             let e = Error::<&'a [u8]>::unexpected_eof(input.span_since(input.offset), None);
-            return Err((input, e));
+            return Err(e);
         }
 
         let bytes = input.input.slice(input.offset..input.offset + AMOUNT);
         input.offset += AMOUNT;
 
-        Ok((input, Self::from_slice(bytes).unwrap()))
+        Ok(Self::from_slice(bytes).unwrap())
     }
 }
 
@@ -369,17 +344,17 @@ impl<T: Clone, Sy: Syncable> FromIterator<T> for Array<T, Sy> {
 
 impl<T: Clone + Deserialize, Sy: Syncable> Deserialize for Array<T, Sy> {
     type Context = <T as Deserialize>::Context;
-    fn deserialize<'parse, 'a>(
-        input: Inp<'parse, 'a, Self::Context>,
-    ) -> Resul<'parse, 'a, Self, Self::Context> {
-        let (input, VarInt::<i32>(length)) = deser_cx(input)?;
+
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(input: &[u8]) -> Self {
+        let VarInt::<i32>(length) = deser_cx(input)?;
         assert!(length >= 0);
         let length = length as usize;
 
         T::deserialize
             .repeated_custom::<Self>()
             .exactly(length)
-            .parse(input)
+            .parse_with(input)
     }
 }
 
@@ -401,19 +376,18 @@ impl<Sy: Syncable> Identifier<Sy> {
         Self(namespace, Sy::refc_from_str(value))
     }
 
-    fn parse<'parse, 'a>(
-        input: aott::input::Input<'parse, &'a str, Extra<()>>,
-    ) -> aott::error::IResult<'parse, &'a str, Extra<()>, Self> {
-        tuple((
+    #[parser(extras = "Extra<()>")]
+    fn parse(input: &str) -> Self {
+        (
             aott::text::ascii::ident.map(|namespace| match namespace {
                 "minecraft" => Namespace::Minecraft,
                 anything_else => Namespace::Custom(Cow::Owned(anything_else.to_owned())),
             }),
             just(":").ignored(),
             aott::text::ascii::ident.map(Sy::refc_from_str),
-        ))
-        .map(|(namespace, (), value)| Self(namespace, value))
-        .parse(input)
+        )
+            .map(|(namespace, (), value)| Self(namespace, value))
+            .parse_with(input)
     }
 }
 
@@ -424,14 +398,10 @@ impl<Sy: Syncable> Serialize for Identifier<Sy> {
     }
 }
 impl<Sy: Syncable> Deserialize for Identifier<Sy> {
-    fn deserialize<'parse, 'a>(
-        input: Inp<'parse, 'a, Self::Context>,
-    ) -> Resul<'parse, 'a, Self, Self::Context> {
-        let (input, FixedStr::<32767, Sy> { inner }) = FixedStr::deserialize(input)?;
-        match Self::parse.parse_from(&inner.deref()).into_result() {
-            Ok(ok) => Ok((input, ok)),
-            Err(err) => Err((input, err)),
-        }
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(input: &[u8]) -> Self {
+        let FixedStr::<32767, Sy> { inner } = FixedStr::deserialize(input)?;
+        Self::parse.parse(inner.deref())
     }
 }
 

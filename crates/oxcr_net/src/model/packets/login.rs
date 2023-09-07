@@ -1,9 +1,10 @@
+use aott::prelude::parser;
 use uuid::Uuid;
 
 use crate::{
     error::Error,
     model::{chat::ChatComponent, State, VarInt},
-    ser::{deser_cx, Array, Deserialize, FixedStr, Json, Serialize},
+    ser::{deser_cx, Array, Deserialize, Extra, FixedStr, Json, Serialize},
 };
 
 use super::{Packet, PacketContext};
@@ -16,17 +17,17 @@ pub struct LoginStart {
 
 impl Deserialize for LoginStart {
     type Context = PacketContext;
-    fn deserialize<'parse, 'a>(
-        input: crate::ser::Inp<'parse, 'a, Self::Context>,
-    ) -> crate::ser::Resul<'parse, 'a, Self, Self::Context> {
-        if input.context().id == Self::ID && input.context().state == Self::STATE {
-            let (input, name) = deser_cx(input)?;
-            let (input, uuid) = deser_cx(input)?;
 
-            Ok((input, Self { name, uuid }))
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(input: &[u8]) -> Self {
+        if input.context().id == Self::ID && input.context().state == Self::STATE {
+            let name = deser_cx(input)?;
+            let uuid = deser_cx(input)?;
+
+            Ok(Self { name, uuid })
         } else {
             let e = Error::InvalidPacketId(input.context().id.0);
-            Err((input, e))
+            Err(e)
         }
     }
 }

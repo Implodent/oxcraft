@@ -12,7 +12,7 @@ chashmap = "2.2.2"
 tracing.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
-aott = { git = "https://github.com/Implodent/AOTT.git", features = ["builtin-bytes"] }
+aott = { git = "https://github.com/Implodent/AOTT.git", branch = "w0.3", features = ["builtin-bytes", "builtin-text", "nightly"] }
 flume = { version = "0.11.0", features = ["async"] }
 serde = "1.0.188"
 serde_json = "1.0.105"

@@ -2,9 +2,7 @@ use crate::{
     model::{State, VarInt},
     ser::*,
 };
-use aott::{
-    bytes as b,
-};
+use aott::{bytes as b, prelude::parser};
 
 use super::{Packet, PacketContext};
 
@@ -25,28 +23,24 @@ pub enum HandshakeNextState {
 impl Deserialize for Handshake {
     type Context = PacketContext;
 
-    fn deserialize<'parse, 'a>(
-        input: Inp<'parse, 'a, PacketContext>,
-    ) -> Resul<'parse, 'a, Self, PacketContext> {
-        let (input, protocol_version) = deser_cx(input)?;
-        let (input, addr) = deser_cx(input)?;
-        let (input, port) = b::number::big::u16(input)?;
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(input: &[u8]) -> Self {
+        let protocol_version = deser_cx(input)?;
+        let addr = deser_cx(input)?;
+        let port = b::number::big::u16(input)?;
         let _offs = input.input.len();
-        let (input, VarInt(next_state)) = deser_cx(input)?;
+        let VarInt(next_state) = deser_cx(input)?;
 
-        Ok((
-            input,
-            Self {
-                protocol_version,
-                addr,
-                port,
-                next_state: match next_state {
-                    1 => HandshakeNextState::Status,
-                    2 => HandshakeNextState::Login,
-                    s => panic!("Invalid NextState: {s}"),
-                },
+        Ok(Self {
+            protocol_version,
+            addr,
+            port,
+            next_state: match next_state {
+                1 => HandshakeNextState::Status,
+                2 => HandshakeNextState::Login,
+                s => panic!("Invalid NextState: {s}"),
             },
-        ))
+        })
     }
 }
 

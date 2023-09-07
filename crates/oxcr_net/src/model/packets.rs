@@ -24,12 +24,13 @@ pub enum PacketServerbound {
 impl Deserialize for PacketServerbound {
     type Context = PacketContext;
 
-    fn deserialize<'parse, 'a>(
-        input: Inp<'parse, 'a, PacketContext>,
-    ) -> Resul<'parse, 'a, Self, PacketContext> {
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(input: &[u8]) -> Self {
         match input.context().id {
-            Handshake::ID => Handshake::deserialize.map(Self::Handshake).parse(input),
-            VarInt(id) => Err((input, Error::InvalidPacketId(id))),
+            id if id == Handshake::ID => Handshake::deserialize
+                .map(Self::Handshake)
+                .parse_with(input),
+            VarInt(id) => Err(Error::InvalidPacketId(id)),
         }
     }
 }
@@ -62,14 +63,15 @@ impl SerializedPacket {
 }
 
 impl Deserialize for SerializedPacket {
-    fn deserialize<'parse, 'a>(input: Inp<'parse, 'a>) -> Resul<'parse, 'a, Self> {
-        tuple((
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(input: &[u8]) -> Self {
+        (
             VarInt::deserialize,
             VarInt::deserialize,
             slice_till_end.map(Bytes::copy_from_slice),
-        ))
-        .map(|(length, id, data)| Self { length, id, data })
-        .parse(input)
+        )
+            .map(|(length, id, data)| Self { length, id, data })
+            .parse_with(input)
     }
 }
 impl Serialize for SerializedPacket {

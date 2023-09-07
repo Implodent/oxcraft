@@ -8,7 +8,12 @@ mod ser;
 /// Equivalent of Zig's `unreachable` in ReleaseFast/ReleaseSmall mode
 macro_rules! explode {
     () => {
-        unsafe { std::hint::unreachable_unchecked() }
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            std::hint::unreachable_unchecked()
+        }
+        #[cfg(debug_assertions)]
+        unreachable!();
     };
 }
 
@@ -17,10 +22,7 @@ async fn rwlock_set<T>(rwlock: &RwLock<T>, value: T) {
     *w = value;
 }
 
-use aott::{
-    error::ParseResult,
-    prelude::{InputOwned, Parser},
-};
+use aott::prelude::Parser;
 use bevy::{app::ScheduleRunnerPlugin, log::LogPlugin, prelude::*, time::TimePlugin};
 use bytes::BytesMut;
 use error::{Error, Result};
@@ -54,7 +56,7 @@ use tokio::{
         TcpListener,
     },
     select,
-    sync::{oneshot, RwLock},
+    sync::{mpsc, RwLock},
 };
 
 use crate::model::{
@@ -86,7 +88,7 @@ impl PlayerNet {
         addr: SocketAddr,
         mut read: OwnedReadHalf,
         mut write: OwnedWriteHalf,
-        shit: oneshot::Sender<()>,
+        shit: mpsc::Sender<()>,
     ) -> Self {
         let (s_recv, recv) = flume::unbounded();
         let (send, r_send) = flume::unbounded();
@@ -114,9 +116,7 @@ impl PlayerNet {
                     if read_bytes == 0 {
                         return Ok(());
                     }
-                    let spack = SerializedPacket::deserialize
-                        .parse_from(&buf.as_ref())
-                        .into_result()?;
+                    let spack = SerializedPacket::deserialize.parse(buf.as_ref())?;
                     s_recv.send_async(spack).await?;
                     buf.clear();
                 }
@@ -133,11 +133,11 @@ impl PlayerNet {
             select! {
                 Ok(Ok(())) = recv_task => {
                     info!(%addr, "Disconnected");
-                    shit.send(()).expect("the fuck????");
+                    shit.send(()).await.expect("the fuck????");
                 }
                 Ok(Err(error)) = send_task => {
                     warn!(%addr, ?error, "Disconnected (error)");
-                    shit.send(()).expect("THE FUCK????");
+                    shit.send(()).await.expect("THE FUCK????");
                 }
             }
         });
@@ -159,8 +159,7 @@ impl PlayerNet {
 
         debug!(addr=%self.addr, ?context, ?sp, "receiving packet");
 
-        let mut input = InputOwned::from_input_with_context(sp.data.as_ref(), context);
-        let result = ParseResult::single(T::deserialize(input.as_ref_at_zero())).into_result();
+        let result = T::deserialize.parse_with_context(sp.data.as_ref(), context);
         debug!(?result, %self.addr, "Received packet");
         result
     }
@@ -311,6 +310,7 @@ impl NetNet {
 struct PlayerLoginEvent {
     pub addr: SocketAddr,
     pub entity: Entity,
+    pub shit: mpsc::Sender<()>,
 }
 
 fn listen(net: Res<NetNet>, rt: Res<TokioTasksRuntime>) {
@@ -326,20 +326,20 @@ fn listen(net: Res<NetNet>, rt: Res<TokioTasksRuntime>) {
             info!(%addr, "accepted");
 
             let (read, write) = tcp.into_split();
-            let (shit, shit_r) = oneshot::channel();
+            let (shit, mut shit_r) = mpsc::channel(1);
 
-            let player = PlayerNet::new(addr, read, write, shit);
+            let player = PlayerNet::new(addr, read, write, shit.clone());
             let entity = t
                 .clone()
                 .run_on_main_thread(move |cx| {
                     let entity = cx.world.spawn((PlayerN(Arc::new(player)),)).id();
-                    cx.world.send_event(PlayerLoginEvent { entity, addr });
+                    cx.world.send_event(PlayerLoginEvent { entity, addr, shit });
                     entity
                 })
                 .await;
             tokio::spawn(async move {
                 let taske = t;
-                shit_r.await.expect("AAAAAAAAAAAAAAAAAAAAAAAAAA");
+                shit_r.recv().await.expect("AAAAAAAAAAAAAAAAAAAAAAAAAA");
                 taske
                     .run_on_main_thread(move |cx| {
                         if !cx.world.despawn(entity) {
@@ -359,13 +359,16 @@ fn on_login(rt: Res<TokioTasksRuntime>, mut ev: EventReader<PlayerLoginEvent>, q
     for event in ev.iter().cloned() {
         info!(%event.addr, "Logged in");
         let player = q.get(event.entity).unwrap().0.clone();
+        let shit = event.shit.to_owned();
         rt.spawn_background_task(move |task| async move {
             let cx = Arc::new(task);
             match player.lifecycle(cx.clone(), event.entity).await {
-                Ok(()) => Ok(()),
+                Ok(()) => Ok::<(), Error>(()),
                 Err(e) => {
                     error!(error=?e, ?player, "Disconnecting");
-                    match *(player.state.read().await) {
+
+                    // ignore the result because we term the connection afterwards
+                    let _ = match *(player.state.read().await) {
                         State::Login => player.send_packet(DisconnectLogin {
                             reason: Json(ChatComponent::String(ChatStringComponent {
                                 text: format!("{e}"),
@@ -379,7 +382,9 @@ fn on_login(rt: Res<TokioTasksRuntime>, mut ev: EventReader<PlayerLoginEvent>, q
                             })),
                         }),
                         _ => Ok(()),
-                    }
+                    };
+                    shit.send(()).await.expect("the f u c k ???");
+                    Ok(())
                 }
             }
         });

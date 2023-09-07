@@ -1,9 +1,9 @@
 use crate::{
     model::{chat::ChatComponent, State, VarInt},
-    ser::{Deserialize, Json, Serialize},
+    ser::{Deserialize, Extra, Json, Serialize},
 };
-use aott::bytes as b;
 use aott::parser::Parser;
+use aott::{bytes as b, prelude::parser};
 use bytes::BufMut;
 use serde_derive::{Deserialize, Serialize};
 
@@ -13,14 +13,14 @@ use super::{Packet, PacketContext};
 pub struct StatusRequest;
 impl Deserialize for StatusRequest {
     type Context = PacketContext;
-    fn deserialize<'parse, 'a>(
-        input: crate::ser::Inp<'parse, 'a, Self::Context>,
-    ) -> crate::ser::Resul<'parse, 'a, Self, Self::Context> {
+
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(input: &[u8]) -> Self {
         if input.context().id.0 == 0x00 && input.context().state == State::Status {
-            Ok((input, Self))
+            Ok(Self)
         } else {
             let id = input.context().id.0;
-            Err((input, crate::error::Error::InvalidPacketId(id)))
+            Err(crate::error::Error::InvalidPacketId(id))
         }
     }
 }
@@ -89,12 +89,12 @@ impl Packet for PingRequest {
 }
 impl Deserialize for PingRequest {
     type Context = PacketContext;
-    fn deserialize<'parse, 'a>(
-        input: crate::ser::Inp<'parse, 'a, Self::Context>,
-    ) -> crate::ser::Resul<'parse, 'a, Self, Self::Context> {
+
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(input: &[u8]) -> Self {
         b::number::big::i64
             .map(|payload| Self { payload })
-            .parse(input)
+            .parse_with(input)
     }
 }
 

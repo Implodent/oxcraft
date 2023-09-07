@@ -13,7 +13,7 @@ impl<T: LEB128Number> VarInt<T> {
 }
 
 pub trait LEB128Number: Sized + Copy {
-    fn read<'parse, 'a>(input: Inp<'parse, 'a>) -> Resul<'parse, 'a, Self>;
+    fn read<'a>(input: &mut Input<&'a [u8], Extra<()>>) -> Resul<'a, Self>;
     fn write_to<B: BufMut>(self, buf: &mut B);
     fn write(self) -> Bytes {
         let mut b = BytesMut::with_capacity(self.leb128_length());
@@ -26,16 +26,14 @@ pub trait LEB128Number: Sized + Copy {
 macro_rules! leb_impl_signed {
     ($signed:ty, $unsigned:ty, $max:literal) => {
         impl LEB128Number for $signed {
-            fn read<'parse, 'a>(mut input: Inp<'parse, 'a>) -> Resul<'parse, 'a, Self> {
+            #[parser(extras = "Extra<()>")]
+            fn read(input: &[u8]) -> Self {
                 let mut result: $signed = 0;
                 let mut shift: $signed = 0;
 
                 let mut byte: u8;
                 loop {
-                    byte = match input.next_or_eof() {
-                        Ok(ok) => ok,
-                        Err(err) => return Err((input, err)),
-                    };
+                    byte = input.next()?;
 
                     result |= ((byte & 0x7fu8) as $signed) << shift;
 
@@ -45,11 +43,11 @@ macro_rules! leb_impl_signed {
                     shift += 7;
 
                     if shift >= $max {
-                        return Err((input, crate::error::Error::VarIntTooBig));
+                        return Err(crate::error::Error::VarIntTooBig);
                     }
                 }
 
-                Ok((input, result))
+                Ok(result)
             }
 
             fn write_to<B: BufMut>(mut self, buf: &mut B) {
@@ -91,10 +89,7 @@ mod tests {
 
     fn test_vi<T: LEB128Number + std::fmt::Debug + std::cmp::PartialEq>(bytes: &[u8], value: T) {
         assert_eq!(
-            VarInt::<T>::deserialize
-                .parse_from(&bytes)
-                .into_result()
-                .unwrap(),
+            VarInt::<T>::deserialize.parse(bytes).unwrap(),
             VarInt(value)
         );
         assert_eq!(VarInt(value).serialize(), bytes);
@@ -114,8 +109,9 @@ mod tests {
 }
 
 impl<T: LEB128Number> Deserialize for VarInt<T> {
-    fn deserialize<'parse, 'a>(input: Inp<'parse, 'a>) -> Resul<'parse, 'a, Self> {
-        T::read.map(Self).parse(input)
+    #[parser(extras = "Extra<()>")]
+    fn deserialize(input: &[u8]) -> Self {
+        T::read.map(Self).parse_with(input)
     }
 }
 
