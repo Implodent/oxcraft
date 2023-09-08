@@ -1,9 +1,12 @@
-* OxCraft - an alternate Minecraft server implementation
-** Roadmap [0/5]
-- [ ] Login sequence
-- [ ] Chunk loading
-- [ ] Saving and loading worlds
-  - [ ] Implement a Slime World Format loader
-  - [ ] Implement an Anvil loader (+ NBT)
-- [ ] Complete feature parity with the official implementation.
-- [ ] Maybe a plugin system?
+* OxCraft - an alternative Minecraft server implementation
+
+** Structure
+*** ECS
+I chose Bevy for the ECS, not because it's better, but because Apecs is dog$hit.
+
+*** Serialization
+I chose AOTT for serialization, becuase serde is too much for me and implementing a serializer AND deserializer is just an awful process and I'm lazy.
+
+** Sources
+
+- [[https://wiki.vg/Protocol][Where I get protocol documentation]]
