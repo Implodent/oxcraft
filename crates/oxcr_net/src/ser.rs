@@ -534,6 +534,11 @@ macro_rules! number_impl {
                             )
                     }
                 }
+                impl Serialize for $num {
+                    fn serialize_to(&self, buf: &mut BytesMut) {
+                        buf.put(&self.to_be_bytes()[..])
+                    }
+                }
             )*
         };
 }

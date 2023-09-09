@@ -1,5 +1,6 @@
 use crate::{
     model::{chat::ChatComponent, player::*, State, VarInt},
+    nbt::NbtJson,
     ser::{Array, Identifier, Json, Serialize},
 };
 
@@ -28,4 +29,5 @@ pub struct LoginPlay {
     pub game_mode: GameMode,
     pub prev_game_mode: PreviousGameMode,
     pub dimension_names: Array<Identifier>,
+    pub registry_codec: NbtJson<RegistryCodec>,
 }

@@ -28,6 +28,8 @@ pub enum Error {
     InvalidStateId(i32),
     #[error("JSON error: {_0}")]
     Json(#[from] serde_json::Error),
+    #[error("NBT fucked up")] // xd
+    NbtFuckup,
 }
 
 pub type Result<T, E = Error> = core::result::Result<T, E>;

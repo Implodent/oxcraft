@@ -1,13 +1,14 @@
 #![allow(dead_code)]
+
 use aott::{
     bytes::{self as b, number::big},
     primitive::{any, take},
 };
-use bytes::BufMut;
+use bytes::{BufMut, BytesMut};
 use derive_more::*;
 use std::collections::HashMap;
 
-use crate::{explode, ser::*};
+use crate::{error::Error, explode, ser::*};
 
 #[derive(Debug, Clone)]
 pub enum Nbt {
@@ -52,49 +53,165 @@ impl Nbt {
         loop {
             match NbtTag::named(input)? {
                 NbtTag::End => break,
-                NbtTag::Normal(NbtNormal { name, value, .. }) => map.insert(name, value),
-                NbtTag::List(_) => {
-                    #[cfg(not(debug_assertions))]
-                    unsafe {
-                        std::hint::unreachable_unchecked()
-                    }
-                    #[cfg(debug_assertions)]
-                    unreachable!("encountered nbt list as element of nbt compound");
-                }
+                NbtTag::Named(NbtNamed { name, value, .. }) => map.insert(name, value),
+                NbtTag::List(_) => return Err(crate::error::Error::NbtFuckup),
             };
         }
 
         Ok(map)
     }
+
+    fn jason_number(n: i64) -> Self {
+        n.try_into()
+            .map(Self::Byte)
+            .or(n
+                .try_into()
+                .map(Self::Short)
+                .or(n.try_into().map(Self::Int)))
+            .unwrap_or_else(|_| Self::Long(n))
+    }
+
+    fn tag(&self) -> NbtTagType {
+        use NbtTagType as T;
+        match &self {
+            Self::Byte(_) => T::Byte,
+            Self::ByteArray(_) => T::ByteArray,
+            Self::Compound(_) => T::Compound,
+            Self::Double(_) => T::Double,
+            Self::Float(_) => T::Float,
+            Self::Int(_) => T::Int,
+            Self::IntArray(_) => T::IntArray,
+            Self::List(_) => T::List,
+            Self::Long(_) => T::Long,
+            Self::LongArray(_) => T::LongArray,
+            Self::Short(_) => T::Short,
+            Self::String(_) => T::String,
+        }
+    }
+
+    #[inline(always)]
+    pub fn serialize_value(&self, buf: &mut bytes::BytesMut) {
+        match self {
+            Self::Byte(b) => buf.put_i8(*b),
+            Self::ByteArray(ba) => SmolArray::serialize_slice(ba, buf),
+            Self::Compound(compound) => Self::serialize_compound(compound, buf),
+            Self::Double(d) => buf.put_f64(*d),
+            Self::Float(f) => buf.put_f32(*f),
+            Self::Int(i) => buf.put_i32(*i),
+            Self::IntArray(ia) => SmolArray::serialize_slice(ia, buf),
+            Self::List(list) => Self::serialize_list(list, buf, cfg!(debug_assertions)),
+            Self::Long(lg) => buf.put_i64(*lg),
+            Self::LongArray(la) => SmolArray::serialize_slice(la, buf),
+            Self::Short(s) => buf.put_i16(*s),
+            Self::String(s) => s.as_str().serialize_to(buf),
+        }
+    }
+
+    #[inline(always)]
+    pub fn serialize_compound(compound: &HashMap<String, Self>, buf: &mut bytes::BytesMut) {
+        for (name, value) in compound {
+            let name = name.as_str();
+
+            // typeid
+            buf.put_u8(value.tag() as _);
+
+            // name
+            name.serialize_to(buf);
+
+            value.serialize_value(buf);
+        }
+    }
+
+    #[inline(always)]
+    pub fn serialize_list(list: &[Self], buf: &mut bytes::BytesMut, check_type: bool) {
+        let r: Result<(), NbtTagType> = try {
+            let tag = match list.first() {
+                None => return,
+                Some(s) => s,
+            }
+            .tag();
+
+            buf.put_u8(tag as _);
+
+            for item in list.iter() {
+                if check_type && item.tag() != tag {
+                    Err(item.tag())?;
+                }
+
+                item.serialize_value(buf);
+            }
+        };
+
+        r.unwrap_or_else(|t| panic!("type-check failed: {t:?}"))
+    }
 }
 
-struct NbtNormal {
+impl Serialize for HashMap<String, Nbt> {
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
+        Nbt::serialize_compound(self, buf)
+    }
+}
+impl Serialize for [Nbt] {
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
+        Nbt::serialize_list(self, buf, cfg!(debug_assertions))
+    }
+}
+
+impl TryFrom<serde_json::Value> for Nbt {
+    type Error = ();
+    fn try_from(value: serde_json::Value) -> Result<Self, ()> {
+        Ok(match value {
+            serde_json::Value::Array(array) => {
+                Self::List(array.into_iter().map(Self::try_from).try_collect()?)
+            }
+            serde_json::Value::Bool(bool) => Self::Byte(bool as i8),
+            serde_json::Value::Null => return Err(()),
+            serde_json::Value::Number(number) => number
+                .as_i64()
+                .map(Self::jason_number)
+                .or(number.as_f64().map(Self::Double))
+                .ok_or(())?,
+            serde_json::Value::String(s) => Self::String(s),
+            serde_json::Value::Object(obj) => Self::Compound(
+                obj.into_iter()
+                    .map(|(k, v)| Ok((k, Self::try_from(v)?)))
+                    .try_collect()?,
+            ),
+        })
+    }
+}
+
+struct NbtNamed {
     pub tag: NbtTagType,
     pub name: String,
     pub value: Nbt,
 }
+
 struct NbtList {
     pub tag: NbtTagType,
-    // must fit in an i32, else ub
+    // must fit in an i32, else everything explodes
     pub length: usize,
     pub tags: Vec<Nbt>,
 }
 
 enum NbtTag {
     End,
-    Normal(NbtNormal),
+    Named(NbtNamed),
     List(NbtList),
 }
+
 impl NbtTag {
     #[parser(extras = "Extra<()>")]
     pub fn named(input: &[u8]) -> Self {
         let tag = nbt_tag(input)?;
+
         if tag == NbtTagType::End {
             return Ok(Self::End);
         }
+
         let name = nbt_string(input)?;
 
-        Ok(Self::Normal(NbtNormal {
+        Ok(Self::Named(NbtNamed {
             tag,
             name,
             value: with_context(Nbt::single, tag)(input)?.unwrap_or_else(
@@ -109,7 +226,7 @@ impl NbtTag {
         let tag = nbt_tag(input)?;
 
         if tag == NbtTagType::End {
-            explode!();
+            return Err(crate::error::Error::NbtFuckup);
         }
 
         let length = b::number::big::i32(input)?;
@@ -118,11 +235,12 @@ impl NbtTag {
 
         let tags = with_context(
             Nbt::single
-                .map(|v| v.unwrap_or_else(|| explode!()))
+                .try_map(|v: Option<Nbt>| v.ok_or(crate::error::Error::NbtFuckup))
                 .repeated()
                 .exactly(length),
             tag,
         )(input)?;
+
         Ok(NbtList { tag, length, tags })
     }
 }
@@ -165,11 +283,21 @@ fn nbt_string(input: &[u8]) -> String {
 
 #[derive(Debug, Clone, Deref)]
 #[deref(forward)]
+#[repr(transparent)]
 struct SmolArray<T>(pub Vec<T>);
 
 impl<T> SmolArray<T> {
     pub fn new(vec: Vec<T>) -> Self {
         Self(vec)
+    }
+    pub fn serialize_slice(slc: &[T], buf: &mut bytes::BytesMut)
+    where
+        T: Serialize,
+    {
+        buf.put_i32(slc.len().try_into().unwrap());
+        for item in slc.iter() {
+            item.serialize_to(buf);
+        }
     }
 }
 
@@ -196,9 +324,21 @@ impl<A> FromIterator<A> for SmolArray<A> {
 
 impl<T: Serialize> Serialize for SmolArray<T> {
     fn serialize_to(&self, buf: &mut bytes::BytesMut) {
-        buf.put_i32(self.len().try_into().unwrap());
-        for item in self.iter() {
-            item.serialize_to(buf);
-        }
+        Self::serialize_slice(&self.0, buf)
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct NbtJson<T>(pub T);
+
+impl<T: serde::Serialize + Clone> Serialize for NbtJson<T> {
+    fn serialize_to(&self, buf: &mut BytesMut) {
+        // SERDE, FUCK YOU!
+        let r: Result<(), crate::error::Error> = try {
+            Nbt::try_from(serde_json::to_value(self.0.clone())?)
+                .map_err(|_| Error::NbtFuckup)?
+                .serialize_value(buf)
+        };
+        r.unwrap()
     }
 }

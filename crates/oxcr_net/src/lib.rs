@@ -1,4 +1,6 @@
 #![feature(associated_type_defaults)]
+#![feature(iterator_try_collect)]
+#![feature(try_blocks)]
 
 mod error;
 mod executor;
