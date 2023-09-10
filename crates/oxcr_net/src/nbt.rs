@@ -28,7 +28,8 @@ pub enum Nbt {
 
 impl Nbt {
     #[parser(extras = "Extra<NbtTagType>")]
-    fn single(input: &[u8]) -> Option<Self> {
+    #[doc(hidden)]
+    pub fn single(input: &[u8]) -> Option<Self> {
         Ok(Some(match input.context() {
             NbtTagType::End => return Ok(None),
             NbtTagType::Byte => Nbt::Byte(big::i8(input)?),
@@ -181,6 +182,43 @@ impl TryFrom<serde_json::Value> for Nbt {
     }
 }
 
+impl Into<serde_json::Value> for Nbt {
+    fn into(self) -> serde_json::Value {
+        use serde_json::Value::*;
+        match self {
+            Nbt::Byte(n) => Number(serde_json::Number::from(n)),
+            Nbt::Short(n) => Number(serde_json::Number::from(n)),
+            Nbt::Int(n) => Number(serde_json::Number::from(n)),
+            Nbt::Float(n) => Number(serde_json::Number::from_f64(n as f64).unwrap()),
+            Nbt::Double(n) => Number(serde_json::Number::from_f64(n).unwrap()),
+            Nbt::Long(n) => Number(serde_json::Number::from(n)),
+            Nbt::ByteArray(a) => Array(
+                a.into_iter()
+                    .map(serde_json::Number::from)
+                    .map(Number)
+                    .collect(),
+            ),
+            Nbt::IntArray(a) => Array(
+                a.into_iter()
+                    .map(serde_json::Number::from)
+                    .map(Number)
+                    .collect(),
+            ),
+            Nbt::LongArray(a) => Array(
+                a.into_iter()
+                    .map(serde_json::Number::from)
+                    .map(Number)
+                    .collect(),
+            ),
+            Nbt::Compound(compound) => {
+                Object(compound.into_iter().map(|(k, v)| (k, v.into())).collect())
+            }
+            Nbt::List(list) => Array(list.into_iter().map(Self::into).collect()),
+            Nbt::String(s) => String(s),
+        }
+    }
+}
+
 struct NbtNamed {
     pub tag: NbtTagType,
     pub name: String,
@@ -328,7 +366,7 @@ impl<T: Serialize> Serialize for SmolArray<T> {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NbtJson<T>(pub T);
 
 impl<T: serde::Serialize + Clone> Serialize for NbtJson<T> {
@@ -340,5 +378,14 @@ impl<T: serde::Serialize + Clone> Serialize for NbtJson<T> {
                 .serialize_value(buf)
         };
         r.unwrap()
+    }
+}
+
+impl<T: serde::de::DeserializeOwned> Deserialize for NbtJson<T> {
+    fn deserialize<'a>(
+        input: &mut aott::prelude::Input<&'a [u8], Extra<Self::Context>>,
+    ) -> aott::PResult<&'a [u8], Self, Extra<Self::Context>> {
+        let tag = with_context(Nbt::single, NbtTagType::Compound)(input)?;
+        Ok(Self(serde_json::from_value(tag.into())?))
     }
 }

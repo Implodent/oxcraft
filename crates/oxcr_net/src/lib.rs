@@ -1,5 +1,6 @@
 #![feature(associated_type_defaults)]
 #![feature(iterator_try_collect)]
+#![feature(decl_macro)]
 #![feature(try_blocks)]
 
 mod error;

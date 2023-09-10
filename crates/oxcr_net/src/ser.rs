@@ -9,6 +9,7 @@ use std::{
     sync::Arc,
 };
 use uuid::Uuid;
+use ux::{i12, i26};
 
 use crate::model::VarInt;
 use ::bytes::{BufMut, BytesMut};
@@ -235,9 +236,9 @@ pub trait Syncable {
     fn refc_from_iter<T: Clone>(iter: impl IntoIterator<Item = T>) -> Self::RefC<[T]>;
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct YesSync;
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NoSync;
 impl Syncable for YesSync {
     const SYNC: bool = true;
@@ -357,7 +358,7 @@ impl Deserialize for Uuid {
     }
 }
 
-#[derive(Debug, Deref)]
+#[derive(Debug, Deref, Clone, PartialEq, Eq)]
 #[deref(forward)]
 pub struct Array<T: Clone, Sy: Syncable = YesSync>(Sy::RefC<[T]>);
 
@@ -544,3 +545,52 @@ macro_rules! number_impl {
 }
 
 number_impl![u8 u16 u32 u64 u128 i8 i16 i32 i64 i128 f32 f64];
+
+/// # Layout
+/// x as a 26-bit integer, followed by z as a 26-bit integer, followed by y as a 12-bit integer (all signed, two's complement).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Position {
+    pub x: i26,
+    pub y: i12,
+    pub z: i26,
+}
+
+pub macro serialize($ty:ty => [$(!)?$($field:ident),*$(,)?]) {
+    impl crate::ser::Serialize for $ty {
+        fn serialize_to(&self, buf: &mut ::bytes::BytesMut) {
+            $(self.$field.serialize_to(buf);)*
+        }
+    }
+}
+pub macro deserialize($(|$context:ty|)? $ty:ty => [$(!)?$($field:ident),*$(,)?]) {
+    impl crate::ser::Deserialize for $ty {
+        type Context = deserialize_field!($(|$context|)?);
+
+        #[parser(extras = "crate::ser::Extra<Self::Context>")]
+        fn deserialize(input: &[u8]) -> Self {
+            Ok(Self {
+                $($field: crate::ser::deserialize_field!($(!)?$field)?,)*
+            })
+        }
+    }
+}
+
+pub macro impl_ser($(|$context:ty|)? $ty:ty => [$(!)?$($field:ident),*$(,)?]) {
+    serialize!($ty => [$(!)?$($field),*$(,)?]);
+    deserialize!($(|$context|)? $ty => [$(!)?$($field),*$(,)?]);
+}
+
+macro deserialize_field {
+    (!$field:ident) => {
+        $field: deser_cx(input)?
+    },
+    ($field:ident) => {
+        $field: deser(input)?
+    },
+    (|$context:ty|) => {
+        $context
+    },
+    () => {
+        ()
+    }
+}
