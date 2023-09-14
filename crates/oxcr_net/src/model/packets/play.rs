@@ -2,6 +2,7 @@ use crate::{
     model::{chat::ChatComponent, player::*, State, VarInt},
     nbt::NbtJson,
     ser::{impl_ser, Array, Identifier, Json, Position, Serialize},
+    PacketContext,
 };
 
 use super::Packet;
@@ -36,7 +37,7 @@ pub struct LoginPlay {
     pub max_players: VarInt,
     pub view_distance: VarInt,
     pub simulation_distance: VarInt,
-    pub reduced_debug_info: VarInt,
+    pub reduced_debug_info: bool,
     pub enable_respawn_screen: bool,
     pub is_debug: bool,
     pub is_flat: bool,
@@ -44,7 +45,26 @@ pub struct LoginPlay {
     pub portal_cooldown: VarInt,
 }
 
-impl_ser!(|PacketContext| LoginPlay => [entity_id, is_hardcore, game_mode]);
+impl_ser!(|PacketContext| LoginPlay => [
+    entity_id,
+    is_hardcore,
+    game_mode,
+    prev_game_mode,
+    dimension_names,
+    registry_codec,
+    dimension_type,
+    dimension_name,
+    hashed_seed,
+    max_players,
+    view_distance,
+    simulation_distance,
+    reduced_debug_info,
+    enable_respawn_screen,
+    is_debug,
+    is_flat,
+    death_location,
+    portal_cooldown
+]);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeathLocation {
@@ -52,8 +72,14 @@ pub struct DeathLocation {
     pub location: Position,
 }
 
+impl_ser!(DeathLocation => [
+    dimension, location
+]);
+
 pub mod json {
     use serde::{Deserialize, Serialize};
+
+    pub const CODEC_120: &'static str = include_str!("./login_play_registry_codec_120.json");
 
     #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]

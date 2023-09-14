@@ -1,4 +1,7 @@
 * OxCraft - an alternative Minecraft server implementation
+** Project status
+This project is sadly not very maintained, because I (nothendev, the only developer), am burnt out, and I just don't have motivation to work on this.
+I just kinda got tired of doing everything by myself.
 
 ** Structure
 *** ECS

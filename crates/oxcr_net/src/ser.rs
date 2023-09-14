@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use crate::nsfr::{i12, i26};
 use derive_more::*;
 use std::{
     borrow::Cow,
@@ -9,7 +10,6 @@ use std::{
     sync::Arc,
 };
 use uuid::Uuid;
-use ux::{i12, i26};
 
 use crate::model::VarInt;
 use ::bytes::{BufMut, BytesMut};
@@ -111,6 +111,11 @@ pub type Resul<'a, T, C = ()> = PResult<&'a [u8], T, Extra<C>>;
 #[parser(extras = "Extra<C>")]
 pub fn deser_cx<T: Deserialize<Context = ()>, C>(input: &[u8]) -> T {
     no_context(T::deserialize)(input)
+}
+
+#[parser(extras = "Extra<C>")]
+pub fn deser<T: Deserialize<Context = C>, C>(input: &[u8]) -> T {
+    T::deserialize(input)
 }
 
 pub fn no_context<
@@ -551,41 +556,38 @@ number_impl![u8 u16 u32 u64 u128 i8 i16 i32 i64 i128 f32 f64];
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Position {
     pub x: i26,
-    pub y: i12,
     pub z: i26,
+    pub y: i12,
 }
 
-pub macro serialize($ty:ty => [$(!)?$($field:ident),*$(,)?]) {
+impl_ser!(Position => [x, z, y]);
+
+pub macro serialize($ty:ty => [$($field:ident),*$(,)?]) {
     impl crate::ser::Serialize for $ty {
         fn serialize_to(&self, buf: &mut ::bytes::BytesMut) {
             $(self.$field.serialize_to(buf);)*
         }
     }
 }
-pub macro deserialize($(|$context:ty|)? $ty:ty => [$(!)?$($field:ident),*$(,)?]) {
+pub macro deserialize($(|$context:ty|)? $ty:ty => [$($(|$cx:ty|)?$field:ident),*$(,)?]) {
     impl crate::ser::Deserialize for $ty {
         type Context = deserialize_field!($(|$context|)?);
 
         #[parser(extras = "crate::ser::Extra<Self::Context>")]
         fn deserialize(input: &[u8]) -> Self {
             Ok(Self {
-                $($field: crate::ser::deserialize_field!($(!)?$field)?,)*
+                $($field: crate::ser::deserialize_field!($(|$cx:ty|)?$field, input)?,)*
             })
         }
     }
 }
 
-pub macro impl_ser($(|$context:ty|)? $ty:ty => [$(!)?$($field:ident),*$(,)?]) {
-    serialize!($ty => [$(!)?$($field),*$(,)?]);
-    deserialize!($(|$context|)? $ty => [$(!)?$($field),*$(,)?]);
-}
-
 macro deserialize_field {
-    (!$field:ident) => {
-        $field: deser_cx(input)?
+    (|$cx:ty| $field:ident, $input:ident) => {
+        crate::ser::deser($input)
     },
-    ($field:ident) => {
-        $field: deser(input)?
+    ($field:ident, $input:ident) => {
+        crate::ser::deser_cx($input)
     },
     (|$context:ty|) => {
         $context
@@ -593,4 +595,9 @@ macro deserialize_field {
     () => {
         ()
     }
+}
+
+pub macro impl_ser($(|$context:ty|)? $ty:ty => [$($(|$cx:ty|)?$field:ident),*$(,)?]) {
+    crate::ser::deserialize!($(|$context|)? $ty => [$($(|$cx|)?$field,)*]);
+    crate::ser::serialize!($ty => [$($field,)*]);
 }

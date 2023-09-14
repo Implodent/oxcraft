@@ -7,6 +7,7 @@ mod error;
 mod executor;
 pub mod model;
 pub mod nbt;
+pub mod nsfr;
 mod ser;
 
 /// Equivalent of Zig's `unreachable` in ReleaseFast/ReleaseSmall mode
@@ -66,13 +67,16 @@ use tokio::{
     sync::{mpsc, RwLock},
 };
 
-use crate::model::{
-    packets::{
-        handshake::HandshakeNextState,
-        login::{DisconnectLogin, LoginSuccess},
-        play::DisconnectPlay,
+use crate::{
+    model::{
+        packets::{
+            handshake::HandshakeNextState,
+            login::{DisconnectLogin, LoginSuccess},
+            play::{DisconnectPlay, LoginPlay},
+        },
+        player::Player, VarInt,
     },
-    player::Player,
+    nbt::NbtJson,
 };
 
 #[derive(Debug)]
@@ -207,16 +211,39 @@ impl PlayerNet {
             properties: Array::empty(),
         })?;
 
+        let game_mode = model::player::GameMode::Survival;
+
         let player = Player {
             name: name.clone(),
             uuid,
-            game_mode: model::player::GameMode::Survival,
+            game_mode,
         };
 
         cx.run_on_main_thread(move |w| {
             let _ = w.world.entity_mut(ent_id).insert(player);
         })
         .await;
+
+        self.send_packet(LoginPlay {
+            entity_id: ent_id.index() as i32,
+            game_mode,
+            prev_game_mode: model::player::PreviousGameMode::Undefined,
+            registry_codec: NbtJson(serde_json::from_str(model::packets::play::json::CODEC_120)?),
+            enable_respawn_screen: true,
+            is_hardcore: false,
+            dimension_names: Array::new(&[Identifier::new(Namespace::Minecraft, "overworld")]),
+            dimension_name: Identifier::new(Namespace::Minecraft, "overworld"),
+            dimension_type: Identifier::new(Namespace::Minecraft, "the-what"),
+            hashed_seed: 0xfaf019,
+            death_location: None,
+            is_debug: false,
+            is_flat: false,
+            max_players: VarInt(0x1000),
+            reduced_debug_info: false,
+            portal_cooldown: VarInt(0),
+            simulation_distance: VarInt(8),
+            view_distance: VarInt(8),
+        });
 
         Ok(())
     }
@@ -285,7 +312,6 @@ impl Plugin for Plug {
             TypeRegistrationPlugin,
             TimePlugin,
             ScheduleRunnerPlugin::run_loop(Duration::from_millis(50)),
-            LogPlugin::default(),
         ))
         .add_event::<PlayerLoginEvent>()
         .insert_resource(NetNet(Arc::new(Network {
