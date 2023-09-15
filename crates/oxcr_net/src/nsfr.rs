@@ -9,25 +9,32 @@ use std::cmp::{Ord, Ordering, PartialOrd};
 
 use std::fmt::{Binary, Display, Formatter, LowerHex, Octal, UpperHex};
 
-pub const fn concat<T, const A: usize, const B: usize, const C: usize>(
+pub const fn concat<T: Copy, const A: usize, const B: usize, const C: usize>(
     a: [T; A],
     b: [T; B],
 ) -> [T; C] {
+    use std::mem::MaybeUninit;
+
     // Assert that `A + B == C`.
     // These overflow if that is not the case, which produces an error at compile-time.
     let _ = C - (A + B); // Assert that `A + B <= C`
     let _ = (A + B) - C; // Assert that `A + B >= C`
 
-    let result: [T; C] = std::array::from_fn(|i| {
-        if i < A {
-            a[i]
-        }
-        else {
-            b[i - A]
-        }
-    });
+    // let result: [T; C] = std::array::from_fn(|i| if i < A { a[i] } else { b[i - A] });
+    let mut result: [MaybeUninit<T>; C] = unsafe { MaybeUninit::uninit().assume_init() };
 
-    result
+    let mut i = 0;
+    loop {
+        if i == C {
+            break;
+        }
+
+        (result[i]).write(if i < A { a[i] } else { b[i - A] });
+
+        i += 1;
+    }
+
+    unsafe { MaybeUninit::array_assume_init(result) }
 }
 
 macro_rules! define_unsigned {
@@ -90,16 +97,10 @@ macro_rules! implement_common {
                 $name::MAX
             }
 
-            pub fn from_be_bytes(bytes: [u8; { $bits / 8 }]) -> $name {
-                $name($type::from_be_bytes(concat(
-                    bytes,
-                    [0u8; { std::mem::size_of::<$type>() - $bits / 8 }],
-                )))
-            }
-
-            pub fn from_ne_bytes(bytes: [u8; { $bits / 8 }]) -> $name {
-                let array = concat(bytes, [0u8; { std::mem::size_of::<$type>() - $bits / 8 }]);
-                $name($type::from_ne_bytes(array))
+            /// Creates [`Self`] from a value of the inner type.
+            /// It is undefined behavior to specify an out of bounds value.
+            pub unsafe fn new_unchecked(value: $type) -> $name {
+                $name(value)
             }
 
             /// Crates a new variable

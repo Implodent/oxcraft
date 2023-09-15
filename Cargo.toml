@@ -4,6 +4,7 @@ members = [
         "crates/oxcr_server",
 ]
 resolver = "2"
+edition = "2021"
 
 [workspace.dependencies]
 oxcr_net.path = "crates/oxcr_net"

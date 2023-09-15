@@ -1,7 +1,4 @@
-#![feature(associated_type_defaults)]
-#![feature(iterator_try_collect)]
-#![feature(decl_macro)]
-#![feature(try_blocks)]
+#![feature(try_blocks, associated_type_defaults, decl_macro, iterator_try_collect, maybe_uninit_array_assume_init, const_mut_refs, const_maybe_uninit_write, const_maybe_uninit_array_assume_init)]
 
 mod error;
 mod executor;
@@ -57,6 +54,7 @@ use model::{
     },
     State,
 };
+
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{
@@ -73,8 +71,10 @@ use crate::{
             handshake::HandshakeNextState,
             login::{DisconnectLogin, LoginSuccess},
             play::{DisconnectPlay, LoginPlay},
+            PluginMessage,
         },
-        player::Player, VarInt,
+        player::Player,
+        VarInt,
     },
     nbt::NbtJson,
 };
@@ -181,6 +181,16 @@ impl PlayerNet {
         Ok(self.send.send(SerializedPacket::new(packet))?)
     }
 
+    /// Sends a plugin message.
+    /// Equivalent to `self.send_packet(PluginMessage { channel, data: data.serialize() })`
+    pub fn plugin_message<T: Serialize + Debug>(&self, channel: Identifier, data: T) -> Result<()> {
+        debug!(?channel, ?data, %self.addr, "Sending plugin message");
+        self.send_packet(PluginMessage {
+            channel,
+            data: data.serialize(),
+        })
+    }
+
     pub async fn lifecycle(&self, cx: Arc<TaskContext>, ent_id: Entity) -> Result<()> {
         let handshake: Handshake = self.recv_packet().await?;
         debug!(?handshake, "Handshake");
@@ -233,7 +243,7 @@ impl PlayerNet {
             is_hardcore: false,
             dimension_names: Array::new(&[Identifier::new(Namespace::Minecraft, "overworld")]),
             dimension_name: Identifier::new(Namespace::Minecraft, "overworld"),
-            dimension_type: Identifier::new(Namespace::Minecraft, "the-what"),
+            dimension_type: Identifier::new(Namespace::Minecraft, "overworld"),
             hashed_seed: 0xfaf019,
             death_location: None,
             is_debug: false,
@@ -243,7 +253,9 @@ impl PlayerNet {
             portal_cooldown: VarInt(0),
             simulation_distance: VarInt(8),
             view_distance: VarInt(8),
-        });
+        })?;
+
+        self.plugin_message(Identifier::MINECRAFT_BRAND, "implodent")?;
 
         Ok(())
     }

@@ -12,10 +12,10 @@ use std::{
 use uuid::Uuid;
 
 use crate::model::VarInt;
-use ::bytes::{BufMut, BytesMut};
+use ::bytes::{BufMut, Bytes, BytesMut};
 pub use aott::prelude::parser;
 pub use aott::prelude::Parser;
-use aott::{pfn_type, prelude::*};
+use aott::{pfn_type, prelude::*, MaybeDeref};
 use tracing::debug;
 
 pub trait Deserialize: Sized {
@@ -207,6 +207,7 @@ impl<const N: usize, Sy: Syncable> Serialize for FixedStr<N, Sy> {
 pub struct FixedStr<const N: usize, Sy: Syncable = YesSync> {
     inner: Sy::RefC<str>,
 }
+
 impl<const N: usize, Sy: Syncable> std::fmt::Display for FixedStr<N, Sy> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         std::fmt::Display::fmt(self.inner.deref(), f)
@@ -236,6 +237,7 @@ pub trait Syncable {
     const SYNC: bool;
     type RefC<T: ?Sized>: Clone + Deref<Target = T> + Sized;
 
+    fn refc_new<T>(t: T) -> Self::RefC<T>;
     fn refc_from_str(s: &str) -> Self::RefC<str>;
     fn refc_from_slice<T: Clone>(slice: &[T]) -> Self::RefC<[T]>;
     fn refc_from_iter<T: Clone>(iter: impl IntoIterator<Item = T>) -> Self::RefC<[T]>;
@@ -248,6 +250,9 @@ pub struct NoSync;
 impl Syncable for YesSync {
     const SYNC: bool = true;
     type RefC<T: ?Sized> = Arc<T>;
+    fn refc_new<T>(t: T) -> Self::RefC<T> {
+        Arc::new(t)
+    }
     fn refc_from_str(s: &str) -> Self::RefC<str> {
         Arc::from(s)
     }
@@ -261,6 +266,9 @@ impl Syncable for YesSync {
 impl Syncable for NoSync {
     const SYNC: bool = false;
     type RefC<T: ?Sized> = Rc<T>;
+    fn refc_new<T>(t: T) -> Self::RefC<T> {
+        Rc::new(t)
+    }
     fn refc_from_str(s: &str) -> Self::RefC<str> {
         Rc::from(s)
     }
@@ -407,8 +415,48 @@ impl<T: Clone + Deserialize, Sy: Syncable> Deserialize for Array<T, Sy> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
-pub struct Identifier<Sy: Syncable = YesSync>(pub Namespace, pub Sy::RefC<str>);
+#[derive(Debug, PartialEq, Eq)]
+pub enum MaybeHeap<'a, T: ?Sized, Sy: Syncable = YesSync> {
+    Heap(Sy::RefC<T>),
+    Ref(&'a T),
+}
+
+impl<'a, T: Clone, Sy: Syncable> Clone for MaybeHeap<'a, T, Sy> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Heap(heap) => Self::Heap(heap.clone()),
+            Self::Ref(r) => Self::Heap(Sy::refc_new((*r).clone())),
+        }
+    }
+}
+impl<'a, Sy: Syncable> Clone for MaybeHeap<'a, str, Sy> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Heap(heap) => Self::Heap(heap.clone()),
+            Self::Ref(r) => Self::Ref(*r),
+        }
+    }
+}
+
+impl<'a, T: ?Sized, Sy: Syncable> Deref for MaybeHeap<'a, T, Sy> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Heap(heap) => heap.deref(),
+            Self::Ref(r) => r,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Identifier<Sy: Syncable = YesSync>(pub Namespace, pub MaybeHeap<'static, str, Sy>);
+impl<Sy: Syncable> PartialEq<Self> for Identifier<Sy> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0 && self.1.deref() == other.1.deref()
+    }
+}
+impl<Sy: Syncable> Eq for Identifier<Sy> {}
 impl<Sy: Syncable> std::fmt::Debug for Identifier<Sy> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Identifier({:?}, {:?})", self.0, self.1.deref())
@@ -421,8 +469,10 @@ impl<Sy: Syncable> Display for Identifier<Sy> {
 }
 
 impl<Sy: Syncable> Identifier<Sy> {
+    pub const MINECRAFT_BRAND: Self = Self(Namespace::Minecraft, MaybeHeap::Ref("brand"));
+
     pub fn new(namespace: Namespace, value: &str) -> Self {
-        Self(namespace, Sy::refc_from_str(value))
+        Self(namespace, MaybeHeap::Heap(Sy::refc_from_str(value)))
     }
 
     #[parser(extras = "Extra<()>")]
@@ -435,7 +485,7 @@ impl<Sy: Syncable> Identifier<Sy> {
             just(":").ignored(),
             aott::text::ascii::ident.map(Sy::refc_from_str),
         )
-            .map(|(namespace, (), value)| Self(namespace, value))
+            .map(|(namespace, (), value)| Self(namespace, MaybeHeap::Heap(value)))
             .parse_with(input)
     }
 }
@@ -559,17 +609,8 @@ impl Serialize for bool {
 
 impl Deserialize for bool {
     #[parser(extras = "Extra<Self::Context>")]
-    fn deserialize(
-            input: &[u8],
-        ) -> Self {
-        if input.input.len() <= input.offset {
-            return Err(Error::<&'a [u8]>::unexpected_eof(input.span_since(input.offset), None));
-        }
-        match input.input[input.offset] {
-            0 => Ok(false),
-            1 => Ok(true),
-            other => Err(Error::<&'a [u8]>::expected_token_found(input.span_since(input.offset), vec![0u8, 1u8], aott::MaybeDeref::Val(other)))
-        }
+    fn deserialize(input: &[u8]) -> Self {
+        Ok(one_of([0x0, 0x1])(input)? == 0x1)
     }
 }
 
@@ -584,7 +625,9 @@ pub struct Position {
 
 impl Serialize for Position {
     fn serialize_to(&self, buf: &mut BytesMut) {
-        let pos = (i64::from(self.x) & 0x3ffffff) << 38 | (i64::from(self.z) & 0x3ffffff) << 12 | (i64::from(self.y) & 0xfff);
+        let pos = (i64::from(self.x) & 0x3ffffff) << 38
+            | (i64::from(self.z) & 0x3ffffff) << 12
+            | (i64::from(self.y) & 0xfff);
         buf.put_i64(pos);
     }
 }
@@ -593,21 +636,16 @@ impl Deserialize for Position {
     type Context = ();
 
     #[parser(extras = "Extra<Self::Context>")]
-    fn deserialize(
-        input: &[u8],
-    ) -> Self {
-        if input.input.len() < input.offset + 8 {
-            return Err(Error::<&'a [u8]>::unexpected_eof(input.span_since(input.offset), None));
+    fn deserialize(input: &[u8]) -> Self {
+        let val = aott::bytes::number::big::i64(input)?;
+
+        unsafe {
+            Ok(Self {
+                x: i26::new_unchecked((val >> 38).try_into().unwrap_unchecked()),
+                z: i26::new_unchecked((val << 26 >> 38).try_into().unwrap_unchecked()),
+                y: i12::new_unchecked((val << 52 >> 52).try_into().unwrap_unchecked()),
+            })
         }
-        let x = i26::from_be_bytes(input.input[input.offset..input.offset + 4].try_into().unwrap());
-        let z = i26::from_be_bytes(input.input[input.offset + 3..input.offset + 7].try_into().unwrap());
-        let y = i12::from_be_bytes(input.input[input.offset + 6..input.offset + 8].try_into().unwrap());
-        input.offset += 8;
-        Ok(Self {
-            x,
-            z,
-            y
-        })
     }
 }
 
@@ -649,4 +687,20 @@ macro deserialize_field {
 pub macro impl_ser($(|$context:ty|)? $ty:ty => [$($(|$cx:ty|)?$field:ident),*$(,)?]) {
     crate::ser::deserialize!($(|$context|)? $ty => [$($(|$cx|)?$field,)*]);
     crate::ser::serialize!($ty => [$($field,)*]);
+}
+
+impl Serialize for Bytes {
+    fn serialize_to(&self, buf: &mut BytesMut) {
+        buf.put_slice(&self)
+    }
+}
+
+impl Deserialize for Bytes {
+    fn deserialize<'a>(
+        input: &mut Input<&'a [u8], Extra<Self::Context>>,
+    ) -> PResult<&'a [u8], Self, Extra<Self::Context>> {
+        Ok(Bytes::copy_from_slice(
+            input.input.slice_from(input.offset..),
+        ))
+    }
 }

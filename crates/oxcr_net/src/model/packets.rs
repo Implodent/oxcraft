@@ -6,7 +6,7 @@ use crate::ser::*;
 
 use self::handshake::Handshake;
 
-use super::VarInt;
+use super::{VarInt, State};
 
 pub mod handshake;
 pub mod login;
@@ -81,4 +81,17 @@ impl Serialize for SerializedPacket {
         self.id.serialize_to(buf);
         buf.put_slice(&self.data);
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct PluginMessage {
+    pub channel: Identifier,
+    pub data: Bytes,
+}
+
+impl_ser!(|PacketContext| PluginMessage => [channel, data]);
+
+impl Packet for PluginMessage {
+    const ID: super::VarInt = VarInt(0x17);
+    const STATE: super::State = State::Play;
 }

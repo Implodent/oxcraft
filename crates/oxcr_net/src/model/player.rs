@@ -1,4 +1,7 @@
-use bevy::prelude::{Component};
+use std::ptr;
+
+use aott::primitive::one_of;
+use bevy::prelude::Component;
 use bytes::BufMut;
 use uuid::Uuid;
 
@@ -26,6 +29,15 @@ impl Serialize for GameMode {
     }
 }
 
+impl Deserialize for GameMode {
+    fn deserialize<'a>(
+        input: &mut aott::prelude::Input<&'a [u8], Extra<Self::Context>>,
+    ) -> aott::PResult<&'a [u8], Self, Extra<Self::Context>> {
+        let byte = one_of([0x0, 0x1, 0x2, 0x3])(input)?;
+        Ok(unsafe { *ptr::addr_of!(byte).cast() })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i8)]
 pub enum PreviousGameMode {
@@ -38,5 +50,15 @@ impl Serialize for PreviousGameMode {
             Self::Undefined => -1,
             Self::Normal(gamemode) => *gamemode as i8,
         });
+    }
+}
+impl Deserialize for PreviousGameMode {
+    fn deserialize<'a>(
+        input: &mut aott::prelude::Input<&'a [u8], Extra<Self::Context>>,
+    ) -> aott::PResult<&'a [u8], Self, Extra<Self::Context>> {
+        let byte = aott::bytes::number::big::i8
+            .filter(|g| (-1..=3).contains(g))
+            .parse_with(input)?;
+        Ok(unsafe { *ptr::addr_of!(byte).cast() })
     }
 }
