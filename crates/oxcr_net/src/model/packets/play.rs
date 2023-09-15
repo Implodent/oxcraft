@@ -45,6 +45,11 @@ pub struct LoginPlay {
     pub portal_cooldown: VarInt,
 }
 
+impl Packet for LoginPlay {
+    const ID: crate::model::VarInt = VarInt(0x28);
+    const STATE: crate::model::State = State::Play;
+}
+
 impl_ser!(|PacketContext| LoginPlay => [
     entity_id,
     is_hardcore,

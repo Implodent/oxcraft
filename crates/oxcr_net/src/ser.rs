@@ -551,6 +551,28 @@ macro_rules! number_impl {
 
 number_impl![u8 u16 u32 u64 u128 i8 i16 i32 i64 i128 f32 f64];
 
+impl Serialize for bool {
+    fn serialize_to(&self, buf: &mut BytesMut) {
+        buf.put_u8(*self as u8);
+    }
+}
+
+impl Deserialize for bool {
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(
+            input: &[u8],
+        ) -> Self {
+        if input.input.len() <= input.offset {
+            return Err(Error::<&'a [u8]>::unexpected_eof(input.span_since(input.offset), None));
+        }
+        match input.input[input.offset] {
+            0 => Ok(false),
+            1 => Ok(true),
+            other => Err(Error::<&'a [u8]>::expected_token_found(input.span_since(input.offset), vec![0u8, 1u8], aott::MaybeDeref::Val(other)))
+        }
+    }
+}
+
 /// # Layout
 /// x as a 26-bit integer, followed by z as a 26-bit integer, followed by y as a 12-bit integer (all signed, two's complement).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -560,7 +582,34 @@ pub struct Position {
     pub y: i12,
 }
 
-impl_ser!(Position => [x, z, y]);
+impl Serialize for Position {
+    fn serialize_to(&self, buf: &mut BytesMut) {
+        let pos = (i64::from(self.x) & 0x3ffffff) << 38 | (i64::from(self.z) & 0x3ffffff) << 12 | (i64::from(self.y) & 0xfff);
+        buf.put_i64(pos);
+    }
+}
+
+impl Deserialize for Position {
+    type Context = ();
+
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(
+        input: &[u8],
+    ) -> Self {
+        if input.input.len() < input.offset + 8 {
+            return Err(Error::<&'a [u8]>::unexpected_eof(input.span_since(input.offset), None));
+        }
+        let x = i26::from_be_bytes(input.input[input.offset..input.offset + 4].try_into().unwrap());
+        let z = i26::from_be_bytes(input.input[input.offset + 3..input.offset + 7].try_into().unwrap());
+        let y = i12::from_be_bytes(input.input[input.offset + 6..input.offset + 8].try_into().unwrap());
+        input.offset += 8;
+        Ok(Self {
+            x,
+            z,
+            y
+        })
+    }
+}
 
 pub macro serialize($ty:ty => [$($field:ident),*$(,)?]) {
     impl crate::ser::Serialize for $ty {

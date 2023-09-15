@@ -1,4 +1,5 @@
-use bevy::prelude::Component;
+use bevy::prelude::{Component};
+use bytes::BufMut;
 use uuid::Uuid;
 
 use crate::ser::*;
@@ -19,9 +20,23 @@ pub enum GameMode {
     Spectator = 3,
 }
 
+impl Serialize for GameMode {
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
+        buf.put_u8(*self as u8);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i8)]
 pub enum PreviousGameMode {
     Undefined = -1,
     Normal(GameMode),
+}
+impl Serialize for PreviousGameMode {
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
+        buf.put_i8(match self {
+            Self::Undefined => -1,
+            Self::Normal(gamemode) => *gamemode as i8,
+        });
+    }
 }
