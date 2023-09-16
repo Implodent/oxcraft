@@ -146,12 +146,6 @@ impl Nbt {
         r.unwrap_or_else(|t| panic!("type-check failed: {t:?}"))
     }
 }
-
-impl Serialize for HashMap<String, Nbt> {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
-        Nbt::serialize_compound(self, buf)
-    }
-}
 impl Serialize for [Nbt] {
     fn serialize_to(&self, buf: &mut bytes::BytesMut) {
         Nbt::serialize_list(self, buf, cfg!(debug_assertions))

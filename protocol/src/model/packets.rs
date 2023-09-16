@@ -6,7 +6,7 @@ use crate::ser::*;
 
 use self::handshake::Handshake;
 
-use super::{VarInt, State};
+use super::{State, VarInt};
 
 pub mod handshake;
 pub mod login;
@@ -59,6 +59,15 @@ impl SerializedPacket {
         let id = P::ID;
         let length = VarInt((id.length_of() + data.len()) as i32);
         Self { length, id, data }
+    }
+
+    pub fn try_deserialize<P: Packet + Deserialize<Context = PacketContext>>(
+        &self,
+        state: State,
+    ) -> Result<P, crate::error::Error> {
+        let context = PacketContext { id: self.id, state };
+
+        P::deserialize.parse_with_context(self.data.as_ref(), context)
     }
 }
 

@@ -126,12 +126,15 @@ impl PlayerNet {
 
         tokio::spawn(async move {
             select! {
-                Ok(Ok(())) = recv_task => {
-                    info!(%peer_addr, "Disconnected (connection ended)");
+                Ok(thimg) = recv_task => {
+                    match thimg {
+                        Ok(()) =>info!(%peer_addr, "Disconnected (connection ended)"),
+                        Err(error) => error!(%peer_addr, ?error, "Disconnected (connection ended)")
+                    }
                     shit.send(()).await.expect("the fuck????");
                 }
                 Ok(Err(error)) = send_task => {
-                    warn!(%peer_addr, ?error, "Disconnected (due to error)");
+                    error!(%peer_addr, ?error, "Disconnected (due to error)");
                     shit.send(()).await.expect("THE FUCK????");
                 }
             }
@@ -149,19 +152,22 @@ impl PlayerNet {
     pub async fn recv_packet<T: Packet + Deserialize<Context = PacketContext> + Debug>(
         &self,
     ) -> Result<T> {
-        let sp = self.recv.recv_async().await?;
+        if self.recv.is_disconnected() {
+            return Err(crate::error::Error::ConnectionEnded);
+        }
+        let packet = self.recv.recv_async().await?;
         let state = *self.state.read().await;
-        let context = PacketContext { id: sp.id, state };
-
-        debug!(%self.peer_addr, ?context, ?sp, "receiving packet");
-
-        let result = T::deserialize.parse_with_context(sp.data.as_ref(), context);
-        debug!(?result, %self.peer_addr, "Received packet");
+        debug!(%self.peer_addr, ?packet, ?state, "Received packet");
+        let result = packet.try_deserialize(state);
+        debug!(?result, %self.peer_addr, "Deserialized packet");
         result
     }
 
     /// Writes a packet.
     pub fn send_packet<T: Packet + Serialize + Debug>(&self, packet: T) -> Result<()> {
+        if self.send.is_disconnected() {
+            return Err(crate::error::Error::ConnectionEnded);
+        }
         debug!(?packet, addr=%self.peer_addr, "Sending packet");
         Ok(self.send.send(SerializedPacket::new(packet))?)
     }
@@ -174,6 +180,27 @@ impl PlayerNet {
             channel,
             data: data.serialize(),
         })
+    }
+
+    /// Receives a packet and tries to deserialize it.
+    /// If deserialization fails, returns the packet as-is, allowing for further attempt at using the packet.
+    pub async fn try_recv_packet<T: Packet + Deserialize<Context = PacketContext> + Debug>(
+        &self,
+    ) -> Result<Result<T, (State, SerializedPacket)>> {
+        let packet = self.recv.recv_async().await?;
+        let state = *self.state.read().await;
+        debug!(%self.peer_addr, ?packet, ?state, "trying to receive packet");
+
+        match packet.try_deserialize(state) {
+            Ok(deserialized) => {
+                debug!(%self.peer_addr, ?deserialized, "Deserialized packet successfully");
+                Ok(Ok(deserialized))
+            }
+            Err(error) => {
+                debug!(%self.peer_addr, ?packet, %error, "Deserialization errored");
+                Ok(Err((state, packet)))
+            }
+        }
     }
 }
 

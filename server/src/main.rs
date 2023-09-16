@@ -3,6 +3,7 @@
 mod model;
 
 use bevy::prelude::*;
+use model::DifficultySetting;
 use oxcr_protocol::{
     executor::{TaskContext, TokioTasksRuntime},
     explode,
@@ -11,13 +12,16 @@ use oxcr_protocol::{
         packets::{
             handshake::{Handshake, HandshakeNextState},
             login::{DisconnectLogin, LoginStart, LoginSuccess},
-            play::{self, DisconnectPlay, GameMode, LoginPlay, PreviousGameMode},
+            play::{
+                self, Abilities, ChangeDifficulty, DisconnectPlay, GameMode, LoginPlay,
+                PlayerAbilities, PreviousGameMode,
+            },
             status::{
                 self, PingRequest, Players, PongResponse, Sample, StatusRequest, StatusResponse,
                 StatusResponseJson,
             },
         },
-        State, VarInt, PROTOCOL_VERSION,
+        Difficulty, State, VarInt, PROTOCOL_VERSION,
     },
     nbt::NbtJson,
     rwlock_set,
@@ -102,7 +106,21 @@ async fn login(net: &PlayerNet, cx: Arc<TaskContext>, ent_id: Entity) -> Result<
         view_distance: VarInt(8),
     })?;
 
+    let difficulty = cx
+        .run_on_main_thread(move |w| *w.world.resource::<DifficultySetting>())
+        .await;
+
     net.plugin_message(Identifier::MINECRAFT_BRAND, "implodent")?;
+    net.send_packet(ChangeDifficulty {
+        difficulty: difficulty.difficulty,
+        difficulty_locked: difficulty.is_locked,
+    })?;
+
+    net.send_packet(PlayerAbilities {
+        flags: Abilities::FLYING,
+        flying_speed: 0.05f32,
+        fov_modifier: 0.1f32,
+    })?;
 
     Ok(())
 }
@@ -263,6 +281,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_plugins(ProtocolPlugin)
         .add_event::<PlayerLoginEvent>()
         .insert_resource(NetNet(Arc::new(Network { tcp })))
+        .insert_resource(DifficultySetting {
+            difficulty: Difficulty::Hard,
+            is_locked: false,
+        })
         .add_systems(Startup, listen)
         .add_systems(Update, on_login)
         .run();

@@ -1,5 +1,5 @@
 use crate::{
-    model::{chat::ChatComponent, State, VarInt},
+    model::{chat::ChatComponent, Difficulty, State, VarInt},
     nbt::NbtJson,
     ser::*,
     PacketContext,
@@ -34,7 +34,7 @@ pub struct LoginPlay {
     pub game_mode: GameMode,
     pub prev_game_mode: PreviousGameMode,
     pub dimension_names: Array<Identifier>,
-    pub registry_codec: NbtJson<json::RegistryCodec>,
+    pub registry_codec: NbtJson<serde_json::Value>,
     pub dimension_type: Identifier,
     pub dimension_name: Identifier,
     pub hashed_seed: i64,
@@ -459,4 +459,52 @@ impl Deserialize for PreviousGameMode {
             .parse_with(input)?;
         Ok(unsafe { *ptr::addr_of!(byte).cast() })
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ChangeDifficulty {
+    pub difficulty: Difficulty,
+    pub difficulty_locked: bool,
+}
+
+impl_ser!(|PacketContext| ChangeDifficulty => [difficulty, difficulty_locked]);
+impl Packet for ChangeDifficulty {
+    const ID: crate::model::VarInt = VarInt(0x0c);
+    const STATE: crate::model::State = State::Play;
+}
+
+#[derive(Debug, Clone)]
+pub struct PlayerAbilities {
+    pub flags: Abilities,
+    pub flying_speed: f32,
+    pub fov_modifier: f32,
+}
+
+bitflags::bitflags! {
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Abilities: u8 {
+        const INVULNERABLE = 0x01;
+        const FLYING = 0x02;
+        const ALLOW_FLYING = 0x04;
+        const CREATIVE_MODE = 0x08;
+    }
+}
+
+impl Serialize for Abilities {
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
+        self.bits().serialize_to(buf)
+    }
+}
+impl Deserialize for Abilities {
+    fn deserialize<'a>(
+        input: &mut aott::prelude::Input<&'a [u8], Extra<Self::Context>>,
+    ) -> aott::PResult<&'a [u8], Self, Extra<Self::Context>> {
+        Self::from_bits(input.next()?).ok_or(crate::error::Error::InvalidBitFlags)
+    }
+}
+impl_ser!(|PacketContext| PlayerAbilities => [flags, flying_speed, fov_modifier]);
+impl Packet for PlayerAbilities {
+    const ID: crate::model::VarInt = VarInt(0x34);
+    const STATE: crate::model::State = State::Play;
 }

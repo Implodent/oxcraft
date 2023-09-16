@@ -28,6 +28,10 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("NBT fucked up")] // xd
     NbtFuckup,
+    #[error("Invalid bit flags encountered")]
+    InvalidBitFlags,
+    #[error("connection ended")]
+    ConnectionEnded,
 }
 
 pub type Result<T, E = Error> = core::result::Result<T, E>;
