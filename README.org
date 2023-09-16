@@ -1,9 +1,4 @@
 * OxCraft - an alternative Minecraft server implementation
-** Project status
-This project is sadly not very maintained, because I (nothendev, the only developer), am burnt out, and I just don't have motivation to work on this.
-I just kinda got tired of doing everything by myself.
-If you want to help me, just submit PRs or hit me up (~nothendev~ on Discord, or ~@noth@md.ilyamikcoder.com~ on Mastodon); I would be very happy to continue working on this together.
-
 ** Structure
 *** ECS
 I chose Bevy for the ECS, not because it's better, but because Apecs is dog$hit.
