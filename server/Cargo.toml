@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-oxcr_net.workspace = true
+oxcr_protocol.workspace = true
 tokio.workspace = true
 bevy.workspace = true
 tracing.workspace = true

@@ -1,13 +1,12 @@
 [workspace]
 members = [
-        "crates/oxcr_net",
-        "crates/oxcr_server",
+        "protocol",
+        "server",
 ]
 resolver = "2"
-edition = "2021"
 
 [workspace.dependencies]
-oxcr_net.path = "crates/oxcr_net"
+oxcr_protocol.path = "protocol"
 tokio = { version = "1", features = [ "macros", "full", "rt", "sync" ] }
 derive_more.version = "0.99.17"
 tracing.version = "0"

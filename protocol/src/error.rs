@@ -4,8 +4,6 @@ use crate::model::packets::SerializedPacket;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("duplicate player IP")]
-    DupePlayer,
     #[error("IO error: {_0}")]
     Io(#[from] std::io::Error),
     #[error("Serialization error: {_0:?}")]

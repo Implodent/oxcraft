@@ -969,7 +969,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "oxcr_net"
+name = "oxcr_protocol"
 version = "0.1.0"
 dependencies = [
  "aott",
@@ -992,7 +992,7 @@ name = "oxcr_server"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "oxcr_net",
+ "oxcr_protocol",
  "tokio",
  "tracing",
  "tracing-subscriber",

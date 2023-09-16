@@ -1,5 +1,5 @@
 [package]
-name = "oxcr_net"
+name = "oxcr_protocol"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,13 +7,14 @@ edition = "2021"
 bevy.workspace = true
 tokio.workspace = true
 derive_more.workspace = true
-chashmap = "2.2.2"
 tracing.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
+
+chashmap = "2.2.2"
 aott = { git = "https://github.com/Implodent/AOTT.git", branch = "w0.3", features = ["builtin-bytes", "builtin-text", "nightly"] }
 flume = { version = "0.11.0", features = ["async"] }
-serde = "1.0.188"
-serde_json = "1.0.105"
-serde_derive = "1.0.188"
+serde = "1"
+serde_json = "1"
+serde_derive = "1"
 uuid = { version = "1.4.1", features = ["v3"] }

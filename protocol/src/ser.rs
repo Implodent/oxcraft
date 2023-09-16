@@ -15,7 +15,7 @@ use crate::model::VarInt;
 use ::bytes::{BufMut, Bytes, BytesMut};
 pub use aott::prelude::parser;
 pub use aott::prelude::Parser;
-use aott::{pfn_type, prelude::*, MaybeDeref};
+use aott::{pfn_type, prelude::*};
 use tracing::debug;
 
 pub trait Deserialize: Sized {

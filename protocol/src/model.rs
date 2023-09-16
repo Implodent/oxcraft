@@ -1,6 +1,5 @@
 pub mod chat;
 pub mod packets;
-pub mod player;
 mod varint;
 pub use varint::*;
 pub mod item;
