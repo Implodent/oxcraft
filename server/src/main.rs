@@ -111,6 +111,7 @@ async fn login(net: &PlayerNet, cx: Arc<TaskContext>, ent_id: Entity) -> Result<
         .await;
 
     net.plugin_message(Identifier::MINECRAFT_BRAND, "implodent")?;
+
     net.send_packet(ChangeDifficulty {
         difficulty: difficulty.difficulty,
         difficulty_locked: difficulty.is_locked,
