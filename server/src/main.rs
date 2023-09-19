@@ -6,7 +6,6 @@ use bevy::prelude::*;
 use model::DifficultySetting;
 use oxcr_protocol::{
     executor::{TaskContext, TokioTasksRuntime},
-    explode,
     model::{
         chat::{self, *},
         packets::{
@@ -55,11 +54,10 @@ async fn login(net: &PlayerNet, cx: Arc<TaskContext>, ent_id: Entity) -> Result<
 
     let LoginStart { name, uuid } = net.recv_packet().await?;
 
-    debug!(login.name=?name, login.uuid=?uuid, %net.peer_addr, "Login");
+    debug!(login.name=?name, login.uuid=?uuid, %net.peer_addr, "Login Start");
 
     let uuid = uuid.unwrap_or_else(|| {
         debug!(?name, "Player is in offline mode");
-
         let real = format!("OfflinePlayer:{name}");
         Uuid::new_v3(&Uuid::NAMESPACE_DNS, real.as_bytes())
     });
@@ -71,6 +69,8 @@ async fn login(net: &PlayerNet, cx: Arc<TaskContext>, ent_id: Entity) -> Result<
         uuid,
         properties: Array::empty(),
     })?;
+
+    rwlock_set(&net.state, State::Play).await;
 
     let game_mode = GameMode::Survival;
 
@@ -196,12 +196,13 @@ struct PlayerLoginEvent {
 fn listen(net: Res<NetNet>, rt: Res<TokioTasksRuntime>) {
     let rt = rt.into_inner();
     let net = (net.into_inner()).0.clone();
+
     info!("listening");
+
     rt.spawn_background_task(move |_task| async move {
         let task = Arc::new(_task);
         loop {
             let t = task.clone();
-            debug!("listen loop");
             let (tcp, addr) = net.tcp.accept().await?;
             info!(%addr, "accepted");
 
@@ -220,11 +221,11 @@ fn listen(net: Res<NetNet>, rt: Res<TokioTasksRuntime>) {
             tokio::spawn(async move {
                 let taske = t;
                 shit_r.recv().await.expect("AAAAAAAAAAAAAAAAAAAAAAAAAA");
+                drop(shit_r);
                 taske
                     .run_on_main_thread(move |cx| {
                         if !cx.world.despawn(entity) {
-                            error!("the fuck");
-                            explode!();
+                            error!(?entity, "despawn failed");
                         }
                     })
                     .await;
@@ -263,7 +264,9 @@ fn on_login(rt: Res<TokioTasksRuntime>, mut ev: EventReader<PlayerLoginEvent>, q
                         }),
                         _ => Ok(()),
                     };
-                    shit.send(()).await.expect("the f u c k ???");
+                    shit.send(())
+                        .await
+                        .unwrap_or_else(|_| error!("disconnect failed (already disconnected)"));
                     Ok(())
                 }
             }

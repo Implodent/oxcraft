@@ -128,14 +128,14 @@ impl PlayerNet {
             select! {
                 Ok(thimg) = recv_task => {
                     match thimg {
-                        Ok(()) =>info!(%peer_addr, "Disconnected (connection ended)"),
+                        Ok(()) => info!(%peer_addr, "Disconnected (connection ended)"),
                         Err(error) => error!(%peer_addr, ?error, "Disconnected (connection ended)")
                     }
-                    shit.send(()).await.expect("the fuck????");
+                    shit.send(()).await.unwrap_or_else(|_| error!("disconnect failed (already disconnected)"));
                 }
                 Ok(Err(error)) = send_task => {
                     error!(%peer_addr, ?error, "Disconnected (due to error)");
-                    shit.send(()).await.expect("THE FUCK????");
+                    shit.send(()).await.unwrap_or_else(|_| error!("disconnect failed (already disconnected)"));
                 }
             }
         });
@@ -152,7 +152,9 @@ impl PlayerNet {
     pub async fn recv_packet<T: Packet + Deserialize<Context = PacketContext> + Debug>(
         &self,
     ) -> Result<T> {
+        let tnov = std::any::type_name::<T>();
         if self.recv.is_disconnected() {
+            debug!(packet=tnov, addr=%self.peer_addr, "receiving packet failed - disconnected");
             return Err(crate::error::Error::ConnectionEnded);
         }
         let packet = self.recv.recv_async().await?;
@@ -165,10 +167,12 @@ impl PlayerNet {
 
     /// Writes a packet.
     pub fn send_packet<T: Packet + Serialize + Debug>(&self, packet: T) -> Result<()> {
+        let tnov = std::any::type_name::<T>();
         if self.send.is_disconnected() {
+            debug!(packet=tnov, addr=%self.peer_addr, "sending packet failed - disconnected");
             return Err(crate::error::Error::ConnectionEnded);
         }
-        debug!(?packet, addr=%self.peer_addr, "Sending packet");
+        debug!(packet=tnov, addr=%self.peer_addr, "Sending packet");
         Ok(self.send.send(SerializedPacket::new(packet))?)
     }
 

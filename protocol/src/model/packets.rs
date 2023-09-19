@@ -74,15 +74,21 @@ impl SerializedPacket {
 impl Deserialize for SerializedPacket {
     #[parser(extras = "Extra<Self::Context>")]
     fn deserialize(input: &[u8]) -> Self {
-        (
-            VarInt::deserialize,
-            VarInt::deserialize,
-            slice_till_end.map(Bytes::copy_from_slice),
-        )
-            .map(|(length, id, data)| Self { length, id, data })
-            .parse_with(input)
+        try {
+            let length = VarInt::deserialize(input)?;
+            assert!(length.0 >= 0);
+            let length_usize = length.0 as usize;
+            let id: VarInt<i32> = VarInt::deserialize(input)?;
+            let data = Bytes::copy_from_slice(
+                input
+                    .input
+                    .slice(input.offset..(input.offset + length_usize - id.length_of())),
+            );
+            Self { length, id, data }
+        }
     }
 }
+
 impl Serialize for SerializedPacket {
     fn serialize_to(&self, buf: &mut BytesMut) {
         buf.reserve(self.length.length_of() + self.id.length_of() + self.data.len());

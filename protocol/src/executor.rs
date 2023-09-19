@@ -37,9 +37,7 @@ pub struct TokioTasksPlugin {
 }
 
 impl Default for TokioTasksPlugin {
-    /// Configures the plugin to build a new Tokio [`Runtime`] with both IO and timer functionality
-    /// enabled. On the wasm32 architecture, the [`Runtime`] will be the current-thread runtime, on all other
-    /// architectures the [`Runtime`] will be the multi-thread runtime.
+    // h
     fn default() -> Self {
         Self {
             make_runtime: Box::new(|| Handle::current()),
