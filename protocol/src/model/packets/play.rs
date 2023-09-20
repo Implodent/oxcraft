@@ -93,6 +93,7 @@ pub mod json {
         Deserialize, Serialize,
     };
 
+    #[cfg(any())]
     #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub struct RegistryCodec {
@@ -114,7 +115,7 @@ pub mod json {
     pub struct Registry<T>(pub HashMap<String, T>);
 
     pub trait RegistryItem {
-        const REGISTRY: &str;
+        const REGISTRY: &'static str;
     }
 
     #[derive(Serialize, Clone)]
