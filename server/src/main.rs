@@ -44,6 +44,10 @@ async fn lifecycle(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) ->
     let handshake: Handshake = net.recv_packet().await?;
     debug!(?handshake, "Handshake");
 
+    if handshake.protocol_version.0 != PROTOCOL_VERSION {
+        return Err(Error::IncorrectVersion(handshake.protocol_version.0));
+    }
+
     match handshake.next_state {
         HandshakeNextState::Login => login(net, cx, ent_id).await,
         HandshakeNextState::Status => status(net).await,

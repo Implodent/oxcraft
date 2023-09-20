@@ -4,8 +4,9 @@ use oxcr_protocol::error::Error as NetError;
 pub enum Error {
     #[error("{_0}")]
     Net(NetError),
-    // #[error("duplicate player IP")]
-    // DupePlayer,
+    #[error("Incorrect protocol version: {_0}")]
+    IncorrectVersion(i32), // #[error("duplicate player IP")]
+                           // DupePlayer,
 }
 
 impl<T: Into<NetError>> From<T> for Error {
