@@ -195,9 +195,9 @@ impl<const N: usize, Sy: Syncable> Deserialize for FixedStr<N, Sy> {
 
 impl<const N: usize, Sy: Syncable> Serialize for FixedStr<N, Sy> {
     fn serialize_to(&self, buf: &mut BytesMut) {
-        let n: i32 = N.try_into().unwrap();
+        let n: i32 = self.len().try_into().unwrap();
         let ln = VarInt(n);
-        buf.reserve(ln.length_of() + N);
+        buf.reserve(ln.length_of() + self.len());
         ln.serialize_to(buf);
         buf.put_slice(self.as_bytes())
     }

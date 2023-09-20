@@ -1,11 +1,10 @@
 use aott::prelude::parser;
-use bytes::BufMut;
 use uuid::Uuid;
 
 use crate::{
     error::Error,
     model::{chat::ChatComponent, State, VarInt},
-    ser::{deser_cx, Array, Deserialize, Extra, FixedStr, Json, Serialize},
+    ser::{deser_cx, Deserialize, Extra, FixedStr, Json, Serialize},
 };
 
 use super::{Packet, PacketContext};
@@ -69,14 +68,13 @@ impl Packet for DisconnectLogin {
 pub struct LoginSuccess {
     pub uuid: Uuid,
     pub username: FixedStr<16>,
-    pub properties: Array<Property>,
 }
 
 impl Serialize for LoginSuccess {
     fn serialize_to(&self, buf: &mut bytes::BytesMut) {
         self.uuid.serialize_to(buf);
         self.username.serialize_to(buf);
-        self.properties.serialize_to(buf);
+        VarInt(0).serialize_to(buf);
     }
 }
 

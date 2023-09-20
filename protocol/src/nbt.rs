@@ -104,23 +104,19 @@ impl Nbt {
             Self::Long(lg) => buf.put_i64(*lg),
             Self::LongArray(la) => SmolArray::serialize_slice(la, buf),
             Self::Short(s) => buf.put_i16(*s),
-            Self::String(s) => s.as_str().serialize_to(buf),
+            Self::String(s) => {
+                buf.put_u16(s.len().try_into().expect("string length was more than u16"));
+                buf.put_slice(s.as_bytes())
+            }
         }
     }
 
     #[inline(always)]
     pub fn serialize_compound(compound: &HashMap<String, Self>, buf: &mut bytes::BytesMut) {
         for (name, value) in compound {
-            let name = name.as_str();
-
-            // typeid
-            buf.put_u8(value.tag() as _);
-
-            // name
-            name.serialize_to(buf);
-
-            value.serialize_value(buf);
+            NbtNamed::serialize_named(value.tag(), name, value, buf)
         }
+        buf.put_u8(NbtTagType::End as _);
     }
 
     #[inline(always)]
@@ -133,6 +129,7 @@ impl Nbt {
             .tag();
 
             buf.put_u8(tag as _);
+            buf.put_i32(list.len().try_into().expect("nbt list length exceeded i32"));
 
             for item in list.iter() {
                 if check_type && item.tag() != tag {
@@ -146,6 +143,7 @@ impl Nbt {
         r.unwrap_or_else(|t| panic!("type-check failed: {t:?}"))
     }
 }
+
 impl Serialize for [Nbt] {
     fn serialize_to(&self, buf: &mut bytes::BytesMut) {
         Nbt::serialize_list(self, buf, cfg!(debug_assertions))
@@ -213,17 +211,35 @@ impl Into<serde_json::Value> for Nbt {
     }
 }
 
+struct NbtList {
+    pub tag: NbtTagType,
+    pub length: usize,
+    pub tags: Vec<Nbt>,
+}
+
 struct NbtNamed {
     pub tag: NbtTagType,
     pub name: String,
     pub value: Nbt,
 }
 
-struct NbtList {
-    pub tag: NbtTagType,
-    // must fit in an i32, else everything explodes
-    pub length: usize,
-    pub tags: Vec<Nbt>,
+impl NbtNamed {
+    pub fn serialize_named(tag: NbtTagType, name: &str, value: &Nbt, buf: &mut BytesMut) {
+        // typeid
+        buf.put_u8(tag as _);
+
+        // name
+        buf.put_u16(name.len().try_into().expect("usize > u16"));
+        buf.put_slice(name.as_bytes());
+
+        value.serialize_value(buf);
+    }
+}
+
+impl Serialize for NbtNamed {
+    fn serialize_to(&self, buf: &mut BytesMut) {
+        Self::serialize_named(self.tag, &self.name, &self.value, buf);
+    }
 }
 
 enum NbtTag {
@@ -290,8 +306,8 @@ pub enum NbtTagType {
     Double,
     ByteArray,
     String,
-    List,
-    Compound,
+    List = 9,
+    Compound = 10,
     IntArray,
     LongArray = 12,
 }
@@ -299,16 +315,14 @@ pub enum NbtTagType {
 #[parser(extras = "Extra<()>")]
 fn nbt_tag(input: &[u8]) -> NbtTagType {
     any.filter(|b| (0u8..=12u8).contains(b))
+        // SAFETY: in filter we filter the tag types to be in bounds
         .map(|b| unsafe { *(&b as *const u8 as *const NbtTagType) })
         .parse_with(input)
 }
 
 #[parser(extras = "Extra<()>")]
 fn nbt_string(input: &[u8]) -> String {
-    let length = b::number::big::i32(input)?;
-    debug_assert!(length >= 0);
-    let length = length as usize;
-
+    let length = b::number::big::u16(input)? as usize;
     let s = take(length)(input)?;
 
     Ok(String::from_utf8(s)?)
@@ -364,11 +378,12 @@ impl<T: Serialize> Serialize for SmolArray<T> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NbtJson<T>(pub T);
 
-impl<T: serde::Serialize + Clone> Serialize for NbtJson<T> {
+impl<T: serde::Serialize> Serialize for NbtJson<T> {
     fn serialize_to(&self, buf: &mut BytesMut) {
         // SERDE, FUCK YOU!
         let r: Result<(), crate::error::Error> = try {
-            Nbt::try_from(serde_json::to_value(self.0.clone())?)
+            let s = serde_json::to_string(&self.0)?;
+            Nbt::try_from(serde_json::from_str::<serde_json::Value>(&s)?)
                 .map_err(|_| Error::NbtFuckup)?
                 .serialize_value(buf)
         };
@@ -382,5 +397,97 @@ impl<T: serde::de::DeserializeOwned> Deserialize for NbtJson<T> {
     ) -> aott::PResult<&'a [u8], Self, Extra<Self::Context>> {
         let tag = with_context(Nbt::single, NbtTagType::Compound)(input)?;
         Ok(Self(serde_json::from_value(tag.into())?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_nbt(value: Nbt, bytes: &[u8]) {
+        let mut buf = BytesMut::new();
+        value.serialize_value(&mut buf);
+        let buff = &buf[..];
+        eprintln!("comparing {value:?}\n left = {buff:x?}\nright = {bytes:x?}",);
+        assert_eq!(buff, bytes);
+    }
+
+    fn test_nbt_named(name: &str, value: Nbt, bytes: &[u8]) {
+        let mut buf = BytesMut::new();
+        NbtNamed::serialize_named(value.tag(), name, &value, &mut buf);
+        let buff = &buf[..];
+        eprintln!("comparing {name} {value:?}\n left = {buff:x?}\nright = {bytes:x?}",);
+        assert_eq!(buff, bytes);
+    }
+
+    fn test_nbt_json<T: serde::Serialize + std::fmt::Debug>(json: T, bytes: &[u8]) {
+        eprintln!("testing {json:?}");
+        let nj = NbtJson(json);
+        let buf = nj.serialize();
+        let buff = &buf[..];
+        eprintln!(" left = {buff:x?}\nright = {bytes:x?}");
+        assert_eq!(buff, bytes);
+    }
+
+    #[test]
+    fn named_tests() {
+        test_nbt_named(
+            "shortTest",
+            Nbt::Short(32767),
+            &[
+                0x02, // type id
+                0x00, 0x09, // length of name
+                0x73, 0x68, 0x6f, 0x72, 0x74, 0x54, 0x65, 0x73, 0x74, // name
+                0x7f, 0xff, // payload
+            ],
+        );
+        test_nbt_named(
+            "hello world",
+            Nbt::Compound(
+                [("name".to_string(), Nbt::String("Bananrama".to_string()))]
+                    .into_iter()
+                    .collect(),
+            ),
+            &[
+                0x0a, // type id of the root compound (0x0a, duh)
+                0x00, 0x0b, // length of name of the root compound
+                0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72, 0x6c,
+                0x64, // name of the root compound
+                0x08, // type id of first element
+                0x00, 0x04, // length of name of first element (4)
+                0x6e, 0x61, 0x6d, 0x65, // name of first element ("name")
+                0x00, 0x09, // length of string named "name" (9)
+                0x42, 0x61, 0x6e, 0x61, 0x6e, 0x72, 0x61, 0x6d, 0x61, // string ("Bananrama")
+                0x00, // TAG_End
+            ],
+        );
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn normal_tests() {
+        {
+            let string = "uqwjmorpqiwuechrqweirwqeфщцшуйзцшуй";
+            let mut bytes = BytesMut::new();
+            bytes.put_u16(string.len() as u16);
+            bytes.put_slice(string.as_bytes());
+            test_nbt(Nbt::String(string.to_string()), &bytes[..]);
+        }
+        {
+            let number: i16 = 0x70;
+            test_nbt(Nbt::Short(number), &[0x00, 0x70                                    ]);
+        }
+        {
+            let number: i32 = 0xd7fa8be;
+            test_nbt(Nbt::Int  (number), &[0x0d, 0x7f, 0xa8, 0xbe                        ]);
+        }
+        {
+            let number: i64 = 0xf7ba6cf39efb2e5;
+            test_nbt(Nbt::Long (number), &[0x0f, 0x7b, 0xa6, 0xcf, 0x39, 0xef, 0xb2, 0xe5]);
+        }
+        {
+            let list = vec![Nbt::Int(0xfeedbee), Nbt::Int(0xfcafeba), Nbt::Int(0xbe00000)];
+            test_nbt(Nbt::List(list), &[NbtTagType::Int as u8, 0x0, 0x0, 0x0, 0x3, 0xf, 0xee, 0xdb, 0xee, 0x0f, 0xca, 0xfe, 0xba, 0xb, 0xe0, 0x00, 0x00])
+        }
     }
 }

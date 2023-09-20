@@ -5,6 +5,7 @@ mod model;
 use bevy::prelude::*;
 use model::DifficultySetting;
 use oxcr_protocol::{
+    bytes::Bytes,
     executor::{TaskContext, TokioTasksRuntime},
     model::{
         chat::{self, *},
@@ -12,8 +13,8 @@ use oxcr_protocol::{
             handshake::{Handshake, HandshakeNextState},
             login::{DisconnectLogin, LoginStart, LoginSuccess},
             play::{
-                self, Abilities, ChangeDifficulty, DisconnectPlay, GameMode, LoginPlay,
-                PlayerAbilities, PreviousGameMode,
+                Abilities, ChangeDifficulty, DisconnectPlay, GameMode, LoginPlay, PlayerAbilities,
+                PreviousGameMode,
             },
             status::{
                 self, PingRequest, Players, PongResponse, Sample, StatusRequest, StatusResponse,
@@ -27,7 +28,7 @@ use oxcr_protocol::{
     ser::{Array, Identifier, Json, Namespace},
     serde::json,
     uuid::Uuid,
-    PlayerN, PlayerNet, ProtocolPlugin,
+    AsyncSet, PlayerN, PlayerNet, ProtocolPlugin,
 };
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, sync::mpsc};
@@ -39,7 +40,7 @@ mod error;
 
 type Result<T, E = error::Error> = ::std::result::Result<T, E>;
 
-async fn lifecycle(net: &PlayerNet, cx: Arc<TaskContext>, ent_id: Entity) -> Result<()> {
+async fn lifecycle(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Result<()> {
     let handshake: Handshake = net.recv_packet().await?;
     debug!(?handshake, "Handshake");
 
@@ -49,8 +50,8 @@ async fn lifecycle(net: &PlayerNet, cx: Arc<TaskContext>, ent_id: Entity) -> Res
     }
 }
 
-async fn login(net: &PlayerNet, cx: Arc<TaskContext>, ent_id: Entity) -> Result<()> {
-    rwlock_set(&net.state, State::Login).await;
+async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Result<()> {
+    net.state.set(State::Login).await;
 
     let LoginStart { name, uuid } = net.recv_packet().await?;
 
@@ -62,15 +63,16 @@ async fn login(net: &PlayerNet, cx: Arc<TaskContext>, ent_id: Entity) -> Result<
         Uuid::new_v3(&Uuid::NAMESPACE_DNS, real.as_bytes())
     });
 
-    info!(?name, ?uuid, addr=%net.peer_addr, "Player joined");
+    let uuid_bytes = Bytes::copy_from_slice(uuid.as_bytes());
+
+    info!(?name, ?uuid, ?uuid_bytes, addr=%net.peer_addr, "Player joined");
 
     net.send_packet(LoginSuccess {
-        username: name.clone(),
         uuid,
-        properties: Array::empty(),
+        username: name.clone(),
     })?;
 
-    rwlock_set(&net.state, State::Play).await;
+    net.state.set(State::Play).await;
 
     let game_mode = GameMode::Survival;
 
@@ -89,7 +91,81 @@ async fn login(net: &PlayerNet, cx: Arc<TaskContext>, ent_id: Entity) -> Result<
         entity_id: ent_id.index() as i32,
         game_mode,
         prev_game_mode: PreviousGameMode::Undefined,
-        registry_codec: NbtJson(json::from_str(play::json::CODEC_120)?),
+        registry_codec: NbtJson(json::json!({
+            "minecraft:dimension_type": {
+                "type": "minecraft:dimension_type",
+                "value": [
+                    {
+                        "name": "minecraft:overworld",
+                        "id": 0,
+                        "element": {
+                            "piglin_safe": false,
+                            "has_raids": true,
+                            "monster_spawn_light_level": 1,
+                            "monster_spawn_block_light_limit": 0,
+                            "natural": true,
+                            "ambient_light": 0.0,
+                            "infiniburn": "#minecraft:infiniburn_overworld",
+                            "respawn_anchor_works": false,
+                            "has_skylight": true,
+                            "bed_works": true,
+                            "effects": "minecraft:overworld",
+                            "min_y": -64,
+                            "height": 320,
+                            "logical_height": 300,
+                            "coordinate_scale": 1.0,
+                            "ultrawarm": false,
+                            "has_ceiling": false
+                        }
+                    }
+                ]
+            },
+            "minecraft:worldgen/biome": {
+                "type": "minecraft:worldgen/biome",
+                "value": [
+                    {
+                        "name": "minecraft:plains",
+                        "id": 0,
+                        "element": {
+                            "has_precipitation": false,
+                            "depth": 0.7,
+                            "temperature": 0.7,
+                            "scale": 1.0,
+                            "downfall": 1.0,
+                            "category": "plains",
+                            "temperature_modifier": "frozen",
+                            "effects": {
+                                "sky_color": 0x7fa1ff,
+                                "water_fog_color": 0x7fa1ff,
+                                "fog_color": 0x7fa1ff,
+                                "water_color": 0x8fa1ff,
+                                "foliage_color": 0xffa1ff,
+                                "grass_color": 0x0a1fb5
+                            }
+                        }
+                    }
+                ]
+            },
+            "minecraft:chat_type": {
+                "type": "minecraft:chat_type",
+                "value": [
+                    {
+                        "name": "minecraft:chat",
+                        "id": 0,
+                        "elements": {
+                            "chat": {
+                                "translation_key": "chat.type.text",
+                                "parameters": ["sender", "content"]
+                            },
+                            "narration": {
+                                "translation_key": "chat.type.text.narrate",
+                                "parameters": ["sender", "content"]
+                            }
+                        }
+                    }
+                ]
+            }
+        })),
         enable_respawn_screen: true,
         is_hardcore: false,
         dimension_names: Array::new(&[Identifier::new(Namespace::Minecraft, "overworld")]),
@@ -126,7 +202,7 @@ async fn login(net: &PlayerNet, cx: Arc<TaskContext>, ent_id: Entity) -> Result<
     Ok(())
 }
 
-async fn status(net: &PlayerNet) -> Result<()> {
+async fn status(net: Arc<PlayerNet>) -> Result<()> {
     rwlock_set(&net.state, State::Status).await;
 
     let _: StatusRequest = net.recv_packet().await?;
@@ -243,7 +319,7 @@ fn on_login(rt: Res<TokioTasksRuntime>, mut ev: EventReader<PlayerLoginEvent>, q
         let shit = event.shit.to_owned();
         rt.spawn_background_task(move |task| async move {
             let cx = Arc::new(task);
-            match lifecycle(&player, cx.clone(), event.entity).await {
+            match lifecycle(player.clone(), cx.clone(), event.entity).await {
                 Ok(()) => Ok::<(), Error>(()),
                 Err(e) => {
                     error!(error=?e, ?player, "Disconnecting");

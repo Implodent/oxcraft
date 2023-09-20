@@ -48,16 +48,20 @@ pub trait Packet {
 
 #[derive(Debug, Clone)]
 pub struct SerializedPacket {
-    pub length: super::VarInt,
+    pub length: usize,
     pub id: super::VarInt,
     pub data: Bytes,
 }
 
 impl SerializedPacket {
     pub fn new<P: Packet + Serialize>(packet: P) -> Self {
+        Self::new_ref(&packet)
+    }
+
+    pub fn new_ref<P: Packet + Serialize>(packet: &P) -> Self {
         let data = packet.serialize();
         let id = P::ID;
-        let length = VarInt((id.length_of() + data.len()) as i32);
+        let length = id.length_of() + data.len();
         Self { length, id, data }
     }
 
@@ -75,14 +79,14 @@ impl Deserialize for SerializedPacket {
     #[parser(extras = "Extra<Self::Context>")]
     fn deserialize(input: &[u8]) -> Self {
         try {
-            let length = VarInt::deserialize(input)?;
-            assert!(length.0 >= 0);
-            let length_usize = length.0 as usize;
+            let length_varint = VarInt::<i32>::deserialize(input)?;
+            assert!(length_varint.0 >= 0);
+            let length = length_varint.0 as usize;
             let id: VarInt<i32> = VarInt::deserialize(input)?;
             let data = Bytes::copy_from_slice(
                 input
                     .input
-                    .slice(input.offset..(input.offset + length_usize - id.length_of())),
+                    .slice(input.offset..(input.offset + length - id.length_of())),
             );
             Self { length, id, data }
         }
@@ -91,8 +95,13 @@ impl Deserialize for SerializedPacket {
 
 impl Serialize for SerializedPacket {
     fn serialize_to(&self, buf: &mut BytesMut) {
-        buf.reserve(self.length.length_of() + self.id.length_of() + self.data.len());
-        self.length.serialize_to(buf);
+        let length = VarInt::<i32>(
+            self.length
+                .try_into()
+                .expect("failed to serialize VarInt length"),
+        );
+        buf.reserve(length.length_of() + self.id.length_of() + self.data.len());
+        length.serialize_to(buf);
         self.id.serialize_to(buf);
         buf.put_slice(&self.data);
     }

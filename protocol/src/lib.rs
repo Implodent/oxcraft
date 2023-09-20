@@ -6,7 +6,10 @@
     maybe_uninit_array_assume_init,
     const_mut_refs,
     const_maybe_uninit_write,
-    const_maybe_uninit_array_assume_init
+    const_maybe_uninit_array_assume_init,
+    async_fn_in_trait,
+    exhaustive_patterns,
+    never_type
 )]
 
 pub mod error;
@@ -39,9 +42,64 @@ macro_rules! explode {
     }};
 }
 
-pub async fn rwlock_set<T>(rwlock: &RwLock<T>, value: T) {
-    let mut w = rwlock.write().await;
-    *w = value;
+pub async fn rwlock_set<T: 'static>(rwlock: &RwLock<T>, value: T) {
+    rwlock.set(value).await
+}
+
+pub trait AsyncGet<T: ?Sized + 'static> {
+    type Ptr<'a, D: ?Sized + 'static>: Deref<Target = D> + 'a;
+
+    async fn get(&self) -> Self::Ptr<'_, T>;
+}
+
+pub trait AsyncSet<T: ?Sized + 'static>: AsyncGet<T> {
+    type PtrMut<'a, D: ?Sized + 'static>: DerefMut<Target = D> + 'a;
+
+    async fn set(&self, value: T)
+    where
+        T: Sized,
+    {
+        let mut mu = self.get_mut().await;
+        *mu.deref_mut() = value;
+    }
+
+    async fn get_mut(&self) -> Self::PtrMut<'_, T>;
+
+    async fn replace(&self, value: T) -> T
+    where
+        T: Sized,
+    {
+        let mut ptr = self.get_mut().await;
+        std::mem::replace(ptr.deref_mut(), value)
+    }
+
+    async fn compare_swap(&self, compare_to: &T, swap_with: T)
+    where
+        T: Sized + PartialEq,
+    {
+        let got = self.get().await;
+        if got.deref() == compare_to {
+            drop(got);
+
+            self.set(swap_with).await;
+        }
+    }
+}
+
+impl<T: ?Sized + 'static> AsyncGet<T> for RwLock<T> {
+    type Ptr<'a, D: ?Sized + 'static> = tokio::sync::RwLockReadGuard<'a, D>;
+
+    async fn get(&self) -> Self::Ptr<'_, T> {
+        self.read().await
+    }
+}
+
+impl<T: ?Sized + 'static> AsyncSet<T> for RwLock<T> {
+    type PtrMut<'a, D: ?Sized + 'static> = tokio::sync::RwLockWriteGuard<'a, D>;
+
+    async fn get_mut(&self) -> Self::PtrMut<'_, T> {
+        self.write().await
+    }
 }
 
 use aott::prelude::Parser;
@@ -49,7 +107,13 @@ use bevy::{app::ScheduleRunnerPlugin, prelude::*, time::TimePlugin};
 use bytes::BytesMut;
 use error::Result;
 use ser::*;
-use std::{fmt::Debug, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    fmt::Debug,
+    net::SocketAddr,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+    time::Duration,
+};
 
 use executor::*;
 
@@ -72,6 +136,8 @@ pub struct PlayerNet {
     pub peer_addr: SocketAddr,
     pub local_addr: SocketAddr,
     pub state: RwLock<State>,
+    pub compression: RwLock<Option<usize>>,
+    pub _explode: mpsc::Sender<()>,
 }
 
 #[derive(Component, Deref, Debug)]
@@ -88,19 +154,18 @@ impl PlayerNet {
         let (s_recv, recv) = flume::unbounded();
         let (send, r_send) = flume::unbounded();
         let send_task = tokio::spawn(async move {
-            async {
+            let Err::<!, _>(e) = async {
                 loop {
                     let packet: SerializedPacket = r_send.recv_async().await?;
                     let data = packet.serialize();
                     write.write_all(&data).await?;
                 }
-                #[allow(unreachable_code)]
-                Ok::<(), crate::error::Error>(())
             }
-            .await?;
+            .await;
 
             drop(write);
-            Ok::<(), crate::error::Error>(())
+
+            return Err::<!, crate::error::Error>(e);
         });
         let recv_task = tokio::spawn(async move {
             async {
@@ -109,27 +174,28 @@ impl PlayerNet {
                 loop {
                     let read_bytes = read.read_buf(&mut buf).await?;
                     if read_bytes == 0 {
-                        return Ok(());
+                        return Ok::<(), crate::error::Error>(());
                     }
                     let spack = SerializedPacket::deserialize.parse(buf.as_ref())?;
                     s_recv.send_async(spack).await?;
                     buf.clear();
                 }
-                #[allow(unreachable_code)]
-                Ok::<(), crate::error::Error>(())
             }
             .await?;
+
             drop(read);
 
             Ok::<(), crate::error::Error>(())
         });
 
+        let shitshit = shit.clone();
         tokio::spawn(async move {
+            let shit = shitshit;
             select! {
                 Ok(thimg) = recv_task => {
                     match thimg {
                         Ok(()) => info!(%peer_addr, "Disconnected (connection ended)"),
-                        Err(error) => error!(%peer_addr, ?error, "Disconnected (connection ended)")
+                        Err(error) => info!(%peer_addr, ?error, "Disconnected (connection ended)")
                     }
                     shit.send(()).await.unwrap_or_else(|_| error!("disconnect failed (already disconnected)"));
                 }
@@ -139,12 +205,15 @@ impl PlayerNet {
                 }
             }
         });
+
         Self {
             send,
             recv,
             peer_addr,
             local_addr,
             state: RwLock::new(State::Handshaking),
+            compression: RwLock::new(None),
+            _explode: shit,
         }
     }
 
@@ -167,13 +236,13 @@ impl PlayerNet {
 
     /// Writes a packet.
     pub fn send_packet<T: Packet + Serialize + Debug>(&self, packet: T) -> Result<()> {
-        let tnov = std::any::type_name::<T>();
         if self.send.is_disconnected() {
-            debug!(packet=tnov, addr=%self.peer_addr, "sending packet failed - disconnected");
+            debug!(?packet, addr=%self.peer_addr, "sending packet failed - disconnected");
             return Err(crate::error::Error::ConnectionEnded);
         }
-        debug!(packet=tnov, addr=%self.peer_addr, "Sending packet");
-        Ok(self.send.send(SerializedPacket::new(packet))?)
+        let spack = SerializedPacket::new_ref(&packet);
+        debug!(?packet, addr=%self.peer_addr, ?spack, "Sending packet");
+        Ok(self.send.send(spack)?)
     }
 
     /// Sends a plugin message.
