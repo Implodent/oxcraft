@@ -92,8 +92,8 @@ impl RegistryItem for DimensionType {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(crate = "serde")]
 pub enum MonsterSpawnLightLevel {
-    Level(u8),
-    Range(RangeInclusive<u8>),
+    Level(i32),
+    Range(RangeInclusive<i32>),
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

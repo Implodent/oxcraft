@@ -1,10 +1,10 @@
 use crate::{
     model::{chat::ChatComponent, Difficulty, State, VarInt},
-    nbt::NbtJson,
+    nbt::{Nbt, NbtJson},
     ser::*,
     PacketContext,
 };
-use std::ptr;
+use std::{collections::HashMap, ptr};
 
 use aott::primitive::one_of;
 use bytes::BufMut;
@@ -34,7 +34,7 @@ pub struct LoginPlay {
     pub game_mode: GameMode,
     pub prev_game_mode: PreviousGameMode,
     pub dimension_names: Array<Identifier>,
-    pub registry_codec: NbtJson<serde_json::Value>,
+    pub registry_codec: NbtJson<HashMap<&'static str, Nbt>>,
     pub dimension_type: Identifier,
     pub dimension_name: Identifier,
     pub hashed_seed: i64,

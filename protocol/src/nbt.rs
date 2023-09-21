@@ -17,7 +17,8 @@ use std::collections::HashMap;
 
 use crate::{error::Error, explode, ser::*};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
 pub enum Nbt {
     Byte(i8),
     Short(i16),
@@ -154,68 +155,6 @@ impl Nbt {
 impl Serialize for [Nbt] {
     fn serialize_to(&self, buf: &mut bytes::BytesMut) {
         Nbt::serialize_list(self, buf, cfg!(debug_assertions))
-    }
-}
-
-impl TryFrom<serde_json::Value> for Nbt {
-    type Error = ();
-
-    fn try_from(value: serde_json::Value) -> Result<Self, ()> {
-        Ok(match value {
-            serde_json::Value::Array(array) => {
-                Self::List(array.into_iter().map(Self::try_from).try_collect()?)
-            }
-            serde_json::Value::Bool(bool) => Self::Byte(bool as i8),
-            serde_json::Value::Null => return Err(()),
-            serde_json::Value::Number(number) => number
-                .as_i64()
-                .map(Self::jason_number)
-                .or(number.as_f64().map(Self::Double))
-                .ok_or(())?,
-            serde_json::Value::String(s) => Self::String(s),
-            serde_json::Value::Object(obj) => Self::Compound(
-                obj.into_iter()
-                    .map(|(k, v)| Ok((k, Self::try_from(v)?)))
-                    .try_collect()?,
-            ),
-        })
-    }
-}
-
-impl Into<serde_json::Value> for Nbt {
-    fn into(self) -> serde_json::Value {
-        use serde_json::Value::*;
-        match self {
-            Nbt::Byte(n) => Number(serde_json::Number::from(n)),
-            Nbt::Short(n) => Number(serde_json::Number::from(n)),
-            Nbt::Int(n) => Number(serde_json::Number::from(n)),
-            Nbt::Float(n) => Number(serde_json::Number::from_f64(n as f64).unwrap()),
-            Nbt::Double(n) => Number(serde_json::Number::from_f64(n).unwrap()),
-            Nbt::Long(n) => Number(serde_json::Number::from(n)),
-            Nbt::ByteArray(a) => Array(
-                a.into_iter()
-                    .map(serde_json::Number::from)
-                    .map(Number)
-                    .collect(),
-            ),
-            Nbt::IntArray(a) => Array(
-                a.into_iter()
-                    .map(serde_json::Number::from)
-                    .map(Number)
-                    .collect(),
-            ),
-            Nbt::LongArray(a) => Array(
-                a.into_iter()
-                    .map(serde_json::Number::from)
-                    .map(Number)
-                    .collect(),
-            ),
-            Nbt::Compound(compound) => {
-                Object(compound.into_iter().map(|(k, v)| (k, v.into())).collect())
-            }
-            Nbt::List(list) => Array(list.into_iter().map(Self::into).collect()),
-            Nbt::String(s) => String(s),
-        }
     }
 }
 
@@ -388,10 +327,8 @@ pub struct NbtJson<T>(pub T);
 
 impl<T: serde::Serialize> Serialize for NbtJson<T> {
     fn serialize_to(&self, buf: &mut BytesMut) {
-        // SERDE, FUCK YOU!
         let r: Result<(), crate::error::Error> = try {
-            let s = serde_json::to_string(&self.0)?;
-            Nbt::try_from(serde_json::from_str::<serde_json::Value>(&s)?)
+            nbt_serde(&self.0)
                 .map_err(|_| Error::NbtFuckup)?
                 .serialize_value(buf)
         };
@@ -399,12 +336,12 @@ impl<T: serde::Serialize> Serialize for NbtJson<T> {
     }
 }
 
-impl<T: serde::de::DeserializeOwned> Deserialize for NbtJson<T> {
+impl<'de, T: serde::de::Deserialize<'de>> Deserialize for NbtJson<T> {
     fn deserialize<'a>(
         input: &mut aott::prelude::Input<&'a [u8], Extra<Self::Context>>,
     ) -> aott::PResult<&'a [u8], Self, Extra<Self::Context>> {
         let tag = with_context(Nbt::single, NbtTagType::Compound)(input)?;
-        Ok(Self(serde_json::from_value(tag.into())?))
+        todo!()
     }
 }
 

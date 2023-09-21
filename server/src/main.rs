@@ -22,14 +22,14 @@ use oxcr_protocol::{
         },
         Difficulty, State, VarInt, PROTOCOL_VERSION,
     },
-    nbt::NbtJson,
+    nbt::{nbt_serde, NbtJson},
     rwlock_set,
     ser::{Array, Identifier, Json, Namespace},
     serde::json,
     uuid::Uuid,
     AsyncSet, PlayerN, PlayerNet, ProtocolPlugin,
 };
-use std::{net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, sync::mpsc};
 use tracing::instrument;
 use tracing_subscriber::EnvFilter;
@@ -93,31 +93,13 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
             let _ = w.world.entity_mut(ent_id).insert(player);
             let dimension_types = w.world.resource::<Registry<DimensionType>>();
             let worldgen_biomes = w.world.resource::<Registry<WorldgenBiome>>();
-            json::json!({
-                "minecraft:dimension_type": dimension_types,
-                "minecraft:worldgen/biome": worldgen_biomes,
-                "minecraft:chat_type": {
-                    "type": "minecraft:chat_type",
-                    "value": [
-                        {
-                            "name": "minecraft:chat",
-                            "id": 0,
-                            "elements": {
-                                "chat": {
-                                    "translation_key": "chat.type.text",
-                                    "parameters": ["sender", "content"]
-                                },
-                                "narration": {
-                                    "translation_key": "chat.type.text.narrate",
-                                    "parameters": ["sender", "content"]
-                                }
-                            }
-                        }
-                    ]
-                }
-            })
+            Ok(HashMap::from_iter([
+                ("minecraft:dimension_type", nbt_serde(dimension_types)?),
+                ("minecraft:worldgen/biome", nbt_serde(worldgen_biomes)?),
+            ]))
         })
-        .await;
+        .await
+        .map_err(|()| Error::Net(oxcr_protocol::error::Error::NbtFuckup))?;
 
     debug!(?registry_codec);
 
