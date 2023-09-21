@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use crate::nsfr::{i12, i26};
 use derive_more::*;
+use miette::SourceSpan;
 use std::{
     borrow::Cow,
     fmt::{Debug, Display},
@@ -34,6 +35,32 @@ pub trait Serialize {
     }
     /// Serializes `self` to the given buffer.
     fn serialize_to(&self, buf: &mut BytesMut);
+}
+
+fn any_of<T: Debug>(v: &[T]) -> String {
+    match v {
+        [el] => format!("{el:?}"),
+        elements => format!("any of {elements:?}"),
+    }
+}
+
+#[derive(thiserror::Error, miette::Diagnostic, Debug)]
+pub enum SerializationErrorKind<Item: Debug> {
+    #[error("expected {}, found {found:?}", any_of(.expected))]
+    #[diagnostic(code(protocol::ser::error::expected))]
+    Expected { expected: Vec<Item>, found: Item },
+    #[error("unexpected end of file")]
+    UnexpectedEof,
+}
+
+#[derive(thiserror::Error, miette::Diagnostic, Debug)]
+#[error("{kind}")]
+pub struct SerializationError<Item: Debug + 'static> {
+    #[label = "here"]
+    pub here: SourceSpan,
+    #[diagnostic(transparent)]
+    #[source]
+    pub kind: SerializationErrorKind<Item>,
 }
 
 pub struct Extra<C>(PhantomData<C>);

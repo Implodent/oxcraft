@@ -26,6 +26,7 @@ pub mod serde {
     pub use ::serde::*;
     pub use ::serde_json as json;
 }
+pub use miette;
 
 /// Equivalent of Zig's `unreachable` in ReleaseFast/ReleaseSmall mode
 #[macro_export]

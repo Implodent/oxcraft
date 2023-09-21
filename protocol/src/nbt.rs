@@ -11,8 +11,7 @@ use serde::{
         SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
         SerializeTupleStruct, SerializeTupleVariant,
     },
-    Serializer,
-    Deserializer,
+    Deserializer, Serializer,
 };
 use std::collections::HashMap;
 
@@ -685,7 +684,8 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         match self.input {
             Nbt::Byte(byte) => self.deserialize_i8(visitor),
             Nbt::Short(short) => self.deserialize_i16(visitor),
@@ -704,17 +704,19 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
 
     fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         visitor.visit_bool(match self.input {
             Nbt::Byte(0) => false,
             Nbt::Byte(1) => true,
-            _ => return Err(Void)
+            _ => return Err(Void),
         })
     }
 
     fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         if let Nbt::Byte(byte) = self.input {
             visitor.visit_i8(*byte)
         } else {
@@ -724,7 +726,8 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
 
     fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         if let Nbt::Short(short) = self.input {
             visitor.visit_i16(*short)
         } else {
@@ -734,7 +737,8 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
 
     fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         if let Nbt::Int(int) = self.input {
             visitor.visit_i32(*int)
         } else {
@@ -744,7 +748,8 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
 
     fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         if let Nbt::Long(long) = self.input {
             visitor.visit_i64(*long)
         } else {
@@ -754,104 +759,117 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
 
     fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         match self.input {
             Nbt::Byte(byte) if *byte >= 0 => visitor.visit_u8(*byte as u8),
-            _ => Err(Void)
+            _ => Err(Void),
         }
     }
 
     fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         match self.input {
             Nbt::Short(short) if *short >= 0 => visitor.visit_u16(*short as u16),
-            _ => Err(Void)
+            _ => Err(Void),
         }
     }
 
     fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         match self.input {
             Nbt::Int(int) if *int >= 0 => visitor.visit_u32(*int as u32),
-            _ => Err(Void)
+            _ => Err(Void),
         }
     }
 
     fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         match self.input {
             Nbt::Long(long) if *long >= 0 => visitor.visit_u64(*long as u64),
-            _ => Err(Void)
+            _ => Err(Void),
         }
     }
 
     fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         if let Nbt::Float(float) = self.input {
             visitor.visit_f32(*float)
-        }
-        else {
+        } else {
             Err(Void)
         }
     }
 
     fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         if let Nbt::Double(double) = self.input {
             visitor.visit_f64(*double)
-        }
-        else {
+        } else {
             Err(Void)
         }
     }
 
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
-            match self.input {
-                Nbt::Int(int) if *int >= 0 => visitor.visit_char((*int as u32).try_into().map_err(|_| Void)?),
-                _ => Err(Void)
+        V: serde::de::Visitor<'de>,
+    {
+        match self.input {
+            Nbt::Int(int) if *int >= 0 => {
+                visitor.visit_char((*int as u32).try_into().map_err(|_| Void)?)
             }
+            _ => Err(Void),
+        }
     }
 
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
     fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
     fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
     fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
@@ -861,7 +879,8 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
@@ -871,19 +890,22 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
     fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
@@ -894,13 +916,15 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
@@ -911,7 +935,8 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
@@ -922,19 +947,22 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
     fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 
     fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
+        V: serde::de::Visitor<'de>,
+    {
         todo!()
     }
 }
@@ -953,9 +981,9 @@ impl serde::ser::Error for Void {
 }
 
 impl serde::de::Error for Void {
-    fn custom<T>(msg:T) -> Self
+    fn custom<T>(msg: T) -> Self
     where
-        T:std::fmt::Display
+        T: std::fmt::Display,
     {
         Self
     }
@@ -1140,4 +1168,14 @@ impl SerializeTupleVariant for NbtSerdeSeq {
 
 pub fn nbt_serde<T: serde::Serialize>(value: &T) -> Result<Nbt, ()> {
     value.serialize(NbtSerde).map_err(|_| ())
+}
+
+#[derive(thiserror::Error, miette::Diagnostic, Debug)]
+pub enum NbtError {
+    #[error("Unsupported type for NBT: u128")]
+    #[diagnostic(
+        code(protocol::nbt::error::unsupported_type_u128),
+        help("NBT does not support types like u128, serialize it as 2 longs (LongArray)")
+    )]
+    UnsupportedTypeU128,
 }

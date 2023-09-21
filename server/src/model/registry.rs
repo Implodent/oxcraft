@@ -21,7 +21,7 @@ pub trait RegistryItem {
 #[serde(crate = "oxcr_protocol::serde")]
 struct Yeet<T> {
     name: String,
-    id: usize,
+    id: i32,
     element: T,
 }
 
@@ -36,7 +36,7 @@ impl<T: RegistryItem + Clone + Serialize> Serialize for Registry<T> {
             .enumerate()
             .map(|(id, (name, element))| Yeet {
                 name: name.clone(),
-                id,
+                id: id.try_into().expect("id didnt fit"),
                 element: element.clone(),
             })
             .collect();
