@@ -85,60 +85,6 @@ impl_ser!(DeathLocation => [
     dimension, location
 ]);
 
-pub mod json {
-    use std::collections::HashMap;
-
-    use serde::{
-        ser::{SerializeMap, SerializeStruct},
-        Deserialize, Serialize,
-    };
-
-    #[cfg(any())]
-    #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct RegistryCodec {
-        #[serde(rename = "minecraft:chat_type")]
-        pub chat_types: Registry<ChatType>,
-        #[serde(rename = "minecraft:damage_type")]
-        pub damage_types: Registry<DamageType>,
-        #[serde(rename = "minecraft:dimension_type")]
-        pub dimension_types: DimensionTypeRegistry,
-        #[serde(rename = "minecraft:trim_material")]
-        pub trim_materials: TrimMaterialRegistry,
-        #[serde(rename = "minecraft:trim_pattern")]
-        pub trim_patterns: TrimPatternRegistry,
-        #[serde(rename = "minecraft:worldgen/biome")]
-        pub biomes: WorldgenBiomeRegistry,
-    }
-
-    #[derive(Default, Debug, Clone, PartialEq, Eq)]
-    pub struct Registry<T>(pub HashMap<String, T>);
-
-    pub trait RegistryItem {
-        const REGISTRY: &'static str;
-    }
-
-    #[derive(Serialize, Clone)]
-    struct Yeet<T> {
-        name: String,
-        id: usize,
-        element: T,
-    }
-
-    impl<T: RegistryItem + Clone> Serialize for Registry<T> {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            let yeet = 0;
-            let mut stf = serializer.serialize_struct("Registry", 2)?;
-            stf.serialize_field("type", T::REGISTRY)?;
-            stf.serialize_field("value", &yeet)?;
-            stf.end()
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum GameMode {

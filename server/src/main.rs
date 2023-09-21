@@ -3,9 +3,8 @@
 mod model;
 
 use bevy::prelude::*;
-use model::DifficultySetting;
+use model::{registry::Registry, DifficultySetting, DimensionType};
 use oxcr_protocol::{
-    bytes::Bytes,
     executor::{TaskContext, TokioTasksRuntime},
     model::{
         chat::{self, *},
@@ -32,9 +31,13 @@ use oxcr_protocol::{
 };
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, sync::mpsc};
+use tracing::instrument;
 use tracing_subscriber::EnvFilter;
 
-use crate::{error::Error, model::Player};
+use crate::{
+    error::Error,
+    model::{Player, PlayerBundle, PlayerGameMode, PlayerName, PlayerUuid, WorldgenBiome},
+};
 
 mod error;
 
@@ -67,9 +70,7 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
         Uuid::new_v3(&Uuid::NAMESPACE_DNS, real.as_bytes())
     });
 
-    let uuid_bytes = Bytes::copy_from_slice(uuid.as_bytes());
-
-    info!(?name, ?uuid, ?uuid_bytes, addr=%net.peer_addr, "Player joined");
+    info!(?name, ?uuid, addr=%net.peer_addr, "Player joined");
 
     net.send_packet(LoginSuccess {
         uuid,
@@ -80,96 +81,51 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
 
     let game_mode = GameMode::Survival;
 
-    let player = Player {
-        name: name.clone(),
-        uuid,
-        game_mode,
+    let player = PlayerBundle {
+        name: PlayerName(name.clone()),
+        uuid: PlayerUuid(uuid),
+        game_mode: PlayerGameMode(game_mode),
+        player_marker: Player,
     };
 
-    cx.run_on_main_thread(move |w| {
-        let _ = w.world.entity_mut(ent_id).insert(player);
-    })
-    .await;
+    let registry_codec = cx
+        .run_on_main_thread(move |w| {
+            let _ = w.world.entity_mut(ent_id).insert(player);
+            let dimension_types = w.world.resource::<Registry<DimensionType>>();
+            let worldgen_biomes = w.world.resource::<Registry<WorldgenBiome>>();
+            json::json!({
+                "minecraft:dimension_type": dimension_types,
+                "minecraft:worldgen/biome": worldgen_biomes,
+                "minecraft:chat_type": {
+                    "type": "minecraft:chat_type",
+                    "value": [
+                        {
+                            "name": "minecraft:chat",
+                            "id": 0,
+                            "elements": {
+                                "chat": {
+                                    "translation_key": "chat.type.text",
+                                    "parameters": ["sender", "content"]
+                                },
+                                "narration": {
+                                    "translation_key": "chat.type.text.narrate",
+                                    "parameters": ["sender", "content"]
+                                }
+                            }
+                        }
+                    ]
+                }
+            })
+        })
+        .await;
+
+    debug!(?registry_codec);
 
     net.send_packet(LoginPlay {
         entity_id: ent_id.index() as i32,
         game_mode,
         prev_game_mode: PreviousGameMode::Undefined,
-        registry_codec: NbtJson(json::json!({
-            "minecraft:dimension_type": {
-                "type": "minecraft:dimension_type",
-                "value": [
-                    {
-                        "name": "minecraft:overworld",
-                        "id": 0,
-                        "element": {
-                            "piglin_safe": false,
-                            "has_raids": true,
-                            "monster_spawn_light_level": 1,
-                            "monster_spawn_block_light_limit": 0,
-                            "natural": true,
-                            "ambient_light": 0.0,
-                            "infiniburn": "#minecraft:infiniburn_overworld",
-                            "respawn_anchor_works": false,
-                            "has_skylight": true,
-                            "bed_works": true,
-                            "effects": "minecraft:overworld",
-                            "min_y": -64,
-                            "height": 320,
-                            "logical_height": 300,
-                            "coordinate_scale": 1.0,
-                            "ultrawarm": false,
-                            "has_ceiling": false
-                        }
-                    }
-                ]
-            },
-            "minecraft:worldgen/biome": {
-                "type": "minecraft:worldgen/biome",
-                "value": [
-                    {
-                        "name": "minecraft:plains",
-                        "id": 0,
-                        "element": {
-                            "has_precipitation": false,
-                            "depth": 0.7,
-                            "temperature": 0.7,
-                            "scale": 1.0,
-                            "downfall": 1.0,
-                            "category": "plains",
-                            "temperature_modifier": "frozen",
-                            "effects": {
-                                "sky_color": 0x7fa1ff,
-                                "water_fog_color": 0x7fa1ff,
-                                "fog_color": 0x7fa1ff,
-                                "water_color": 0x8fa1ff,
-                                "foliage_color": 0xffa1ff,
-                                "grass_color": 0x0a1fb5
-                            }
-                        }
-                    }
-                ]
-            },
-            "minecraft:chat_type": {
-                "type": "minecraft:chat_type",
-                "value": [
-                    {
-                        "name": "minecraft:chat",
-                        "id": 0,
-                        "elements": {
-                            "chat": {
-                                "translation_key": "chat.type.text",
-                                "parameters": ["sender", "content"]
-                            },
-                            "narration": {
-                                "translation_key": "chat.type.text.narrate",
-                                "parameters": ["sender", "content"]
-                            }
-                        }
-                    }
-                ]
-            }
-        })),
+        registry_codec: NbtJson(registry_codec),
         enable_respawn_screen: true,
         is_hardcore: false,
         dimension_names: Array::new(&[Identifier::new(Namespace::Minecraft, "overworld")]),
@@ -354,6 +310,24 @@ fn on_login(rt: Res<TokioTasksRuntime>, mut ev: EventReader<PlayerLoginEvent>, q
     }
 }
 
+#[instrument]
+fn init_registries(
+    mut dimension_types: ResMut<Registry<DimensionType>>,
+    mut worldgen_biomes: ResMut<Registry<WorldgenBiome>>,
+) {
+    info!("initializing registries...");
+
+    dimension_types
+        .0
+        .extend([("minecraft:overworld".to_string(), DimensionType::OVERWORLD)]);
+
+    worldgen_biomes
+        .0
+        .extend([("minecraft:plains".to_string(), WorldgenBiome::PLAINS)]);
+
+    info!(dimension_types=?dimension_types.0, worldgen_biomes=?worldgen_biomes.0, "successfully initialized registries.");
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -369,7 +343,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             difficulty: Difficulty::Hard,
             is_locked: false,
         })
-        .add_systems(Startup, listen)
+        .init_resource::<Registry<DimensionType>>()
+        .init_resource::<Registry<WorldgenBiome>>()
+        .add_systems(Startup, (init_registries, listen))
         .add_systems(Update, on_login)
         .run();
     Ok(())

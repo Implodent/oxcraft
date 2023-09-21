@@ -152,6 +152,7 @@ impl Serialize for [Nbt] {
 
 impl TryFrom<serde_json::Value> for Nbt {
     type Error = ();
+
     fn try_from(value: serde_json::Value) -> Result<Self, ()> {
         Ok(match value {
             serde_json::Value::Array(array) => {
