@@ -6,6 +6,13 @@ use aott::{
 };
 use bytes::{BufMut, BytesMut};
 use derive_more::*;
+use serde::{
+    ser::{
+        SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
+        SerializeTupleStruct, SerializeTupleVariant,
+    },
+    Serializer,
+};
 use std::collections::HashMap;
 
 use crate::{error::Error, explode, ser::*};
@@ -491,4 +498,432 @@ mod tests {
             test_nbt(Nbt::List(list), &[NbtTagType::Int as u8, 0x0, 0x0, 0x0, 0x3, 0xf, 0xee, 0xdb, 0xee, 0x0f, 0xca, 0xfe, 0xba, 0xb, 0xe0, 0x00, 0x00])
         }
     }
+}
+
+struct NbtSerde;
+
+impl Serializer for NbtSerde {
+    type Ok = Nbt;
+    type Error = Void;
+    type SerializeMap = NbtSerdeMap;
+    type SerializeSeq = NbtSerdeSeq;
+    type SerializeStruct = NbtSerdeMap;
+    type SerializeStructVariant = NbtSerdeMap;
+    type SerializeTuple = NbtSerdeSeq;
+    type SerializeTupleStruct = NbtSerdeSeq;
+    type SerializeTupleVariant = NbtSerdeSeq;
+
+    fn is_human_readable(&self) -> bool {
+        false
+    }
+
+    fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
+        Ok(Nbt::Byte(v as i8))
+    }
+
+    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
+        Ok(Nbt::ByteArray(
+            v.into_iter()
+                .map(|b| (*b).try_into().map_err(|_| Void))
+                .try_collect()?,
+        ))
+    }
+
+    fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
+        Ok(Nbt::String(String::from(v)))
+    }
+
+    fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
+        Ok(Nbt::Float(v))
+    }
+
+    fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
+        Ok(Nbt::Double(v))
+    }
+
+    fn serialize_i128(self, _unsupported: i128) -> Result<Self::Ok, Self::Error> {
+        Err(Void)
+    }
+
+    fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
+        Ok(Nbt::Short(v))
+    }
+
+    fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
+        Ok(Nbt::Int(v))
+    }
+
+    fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
+        Ok(Nbt::Long(v))
+    }
+
+    fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
+        Ok(Nbt::Byte(v))
+    }
+
+    fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
+        Ok(NbtSerdeMap(
+            len.map(HashMap::with_capacity).unwrap_or_else(HashMap::new),
+            None,
+            None,
+        ))
+    }
+
+    fn serialize_newtype_struct<T: ?Sized>(
+        self,
+        name: &'static str,
+        value: &T,
+    ) -> Result<Self::Ok, Self::Error>
+    where
+        T: serde::Serialize,
+    {
+        value.serialize(self)
+    }
+
+    fn serialize_newtype_variant<T: ?Sized>(
+        self,
+        name: &'static str,
+        variant_index: u32,
+        variant: &'static str,
+        value: &T,
+    ) -> Result<Self::Ok, Self::Error>
+    where
+        T: serde::Serialize,
+    {
+        Ok(Nbt::Compound(HashMap::from_iter([(
+            variant.to_string(),
+            value.serialize(self)?,
+        )])))
+    }
+
+    fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
+        Err(Void)
+    }
+
+    fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+        Ok(NbtSerdeSeq(
+            len.map(Vec::with_capacity).unwrap_or_else(Vec::new),
+            None,
+        ))
+    }
+
+    fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
+    where
+        T: serde::Serialize,
+    {
+        value.serialize(self)
+    }
+
+    fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
+        Ok(Nbt::String(v.to_string()))
+    }
+
+    fn serialize_struct(
+        self,
+        _name: &'static str,
+        len: usize,
+    ) -> Result<Self::SerializeStruct, Self::Error> {
+        Ok(NbtSerdeMap(HashMap::with_capacity(len), None, None))
+    }
+
+    fn serialize_struct_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        variant: &'static str,
+        len: usize,
+    ) -> Result<Self::SerializeStructVariant, Self::Error> {
+        Ok(NbtSerdeMap(
+            HashMap::with_capacity(len),
+            Some(variant),
+            None,
+        ))
+    }
+
+    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
+        Ok(NbtSerdeSeq(Vec::with_capacity(len), None))
+    }
+
+    fn serialize_tuple_struct(
+        self,
+        _name: &'static str,
+        len: usize,
+    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
+        Ok(NbtSerdeSeq(Vec::with_capacity(len), None))
+    }
+
+    fn serialize_tuple_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        variant: &'static str,
+        len: usize,
+    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
+        Ok(NbtSerdeSeq(Vec::with_capacity(len), Some(variant)))
+    }
+
+    fn collect_map<K, V, I>(self, iter: I) -> Result<Self::Ok, Self::Error>
+    where
+        K: serde::Serialize,
+        V: serde::Serialize,
+        I: IntoIterator<Item = (K, V)>,
+    {
+        Ok(Nbt::Compound(
+            iter.into_iter()
+                .map(|(key, value)| match key.serialize(NbtSerde)? {
+                    Nbt::String(s) => Ok((s, value.serialize(NbtSerde)?)),
+                    _ => Err(Void),
+                })
+                .try_collect()?,
+        ))
+    }
+
+    fn collect_seq<I>(self, iter: I) -> Result<Self::Ok, Self::Error>
+    where
+        I: IntoIterator,
+        <I as IntoIterator>::Item: serde::Serialize,
+    {
+        iter.into_iter()
+            .map(|thing| serde::Serialize::serialize(&thing, NbtSerde))
+            .try_collect::<Vec<Nbt>>()
+            .map(Nbt::List)
+    }
+
+    fn collect_str<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
+    where
+        T: std::fmt::Display,
+    {
+        Ok(Nbt::String(value.to_string()))
+    }
+
+    fn serialize_u128(self, v: u128) -> Result<Self::Ok, Self::Error> {
+        Err(Void)
+    }
+
+    fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
+        v.try_into().map_err(|_| Void).map(Nbt::Byte)
+    }
+
+    fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
+        v.try_into().map_err(|_| Void).map(Nbt::Short)
+    }
+
+    fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
+        v.try_into().map_err(|_| Void).map(Nbt::Int)
+    }
+
+    fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
+        v.try_into().map_err(|_| Void).map(Nbt::Long)
+    }
+
+    fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
+        Err(Void)
+    }
+
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
+        Err(Void)
+    }
+
+    fn serialize_unit_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+    ) -> Result<Self::Ok, Self::Error> {
+        Err(Void)
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("")]
+pub struct Void;
+
+impl serde::ser::Error for Void {
+    fn custom<T>(_msg: T) -> Self
+    where
+        T: std::fmt::Display,
+    {
+        Self
+    }
+}
+
+struct NbtSerdeMap(HashMap<String, Nbt>, Option<&'static str>, Option<String>);
+
+impl SerializeMap for NbtSerdeMap {
+    type Ok = Nbt;
+    type Error = Void;
+
+    fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error>
+    where
+        T: serde::Serialize,
+    {
+        let keyy = key.serialize(NbtSerde)?;
+        match keyy {
+            Nbt::String(s) => Ok(self.2.replace(s).map(|_| ()).unwrap_or(())),
+            _ => Err(Void),
+        }
+    }
+
+    fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: serde::Serialize,
+    {
+        self.0
+            .insert(self.2.take().ok_or(Void)?, value.serialize(NbtSerde)?);
+        Ok(())
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        Ok(match self.1 {
+            Some(key) => Nbt::Compound(HashMap::from_iter([(
+                key.to_string(),
+                Nbt::Compound(self.0),
+            )])),
+            None => Nbt::Compound(self.0),
+        })
+    }
+}
+
+impl SerializeStruct for NbtSerdeMap {
+    type Ok = Nbt;
+    type Error = Void;
+
+    fn serialize_field<T: ?Sized>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<(), Self::Error>
+    where
+        T: serde::Serialize,
+    {
+        self.0.insert(key.to_string(), value.serialize(NbtSerde)?);
+        Ok(())
+    }
+
+    fn skip_field(&mut self, _key: &'static str) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        Ok(match self.1 {
+            Some(key) => Nbt::Compound(HashMap::from_iter([(
+                key.to_string(),
+                Nbt::Compound(self.0),
+            )])),
+            None => Nbt::Compound(self.0),
+        })
+    }
+}
+
+impl SerializeStructVariant for NbtSerdeMap {
+    type Ok = Nbt;
+    type Error = Void;
+
+    fn serialize_field<T: ?Sized>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<(), Self::Error>
+    where
+        T: serde::Serialize,
+    {
+        self.0.insert(key.to_string(), value.serialize(NbtSerde)?);
+        Ok(())
+    }
+
+    fn skip_field(&mut self, _key: &'static str) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        Ok(match self.1 {
+            Some(key) => Nbt::Compound(HashMap::from_iter([(
+                key.to_string(),
+                Nbt::Compound(self.0),
+            )])),
+            None => Nbt::Compound(self.0),
+        })
+    }
+}
+
+struct NbtSerdeSeq(Vec<Nbt>, Option<&'static str>);
+
+impl SerializeSeq for NbtSerdeSeq {
+    type Ok = Nbt;
+    type Error = Void;
+
+    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: serde::Serialize,
+    {
+        value.serialize(NbtSerde).map(|v| self.0.push(v))
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        Ok(match self.1 {
+            Some(key) => Nbt::Compound(HashMap::from_iter([(key.to_string(), Nbt::List(self.0))])),
+            None => Nbt::List(self.0),
+        })
+    }
+}
+
+impl SerializeTuple for NbtSerdeSeq {
+    type Ok = Nbt;
+    type Error = Void;
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        Ok(match self.1 {
+            Some(key) => Nbt::Compound(HashMap::from_iter([(key.to_string(), Nbt::List(self.0))])),
+            None => Nbt::List(self.0),
+        })
+    }
+
+    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: serde::Serialize,
+    {
+        value.serialize(NbtSerde).map(|v| self.0.push(v))
+    }
+}
+
+impl SerializeTupleStruct for NbtSerdeSeq {
+    type Ok = Nbt;
+    type Error = Void;
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        Ok(match self.1 {
+            Some(key) => Nbt::Compound(HashMap::from_iter([(key.to_string(), Nbt::List(self.0))])),
+            None => Nbt::List(self.0),
+        })
+    }
+
+    fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: serde::Serialize,
+    {
+        value.serialize(NbtSerde).map(|v| self.0.push(v))
+    }
+}
+
+impl SerializeTupleVariant for NbtSerdeSeq {
+    type Ok = Nbt;
+    type Error = Void;
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        Ok(match self.1 {
+            Some(key) => Nbt::Compound(HashMap::from_iter([(key.to_string(), Nbt::List(self.0))])),
+            None => Nbt::List(self.0),
+        })
+    }
+
+    fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: serde::Serialize,
+    {
+        value.serialize(NbtSerde).map(|v| self.0.push(v))
+    }
+}
+
+pub fn nbt_serde<T: serde::Serialize>(value: &T) -> Result<Nbt, ()> {
+    value.serialize(NbtSerde).map_err(|_| ())
 }
