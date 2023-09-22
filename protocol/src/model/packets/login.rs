@@ -43,7 +43,7 @@ pub struct DisconnectLogin {
 }
 
 impl Serialize for DisconnectLogin {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
         self.reason.serialize_to(buf)
     }
 }
@@ -71,10 +71,11 @@ pub struct LoginSuccess {
 }
 
 impl Serialize for LoginSuccess {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
-        self.uuid.serialize_to(buf);
-        self.username.serialize_to(buf);
-        VarInt(0).serialize_to(buf);
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
+        self.uuid.serialize_to(buf)?;
+        self.username.serialize_to(buf)?;
+        VarInt(0).serialize_to(buf)?;
+        Ok(())
     }
 }
 
@@ -97,9 +98,10 @@ pub struct Property {
 }
 
 impl Serialize for Property {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
-        self.name.serialize_to(buf);
-        self.value.serialize_to(buf);
-        self.signature.serialize_to(buf);
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error>{
+        self.name.serialize_to(buf)?;
+        self.value.serialize_to(buf)?;
+        self.signature.serialize_to(buf)?;
+        Ok(())
     }
 }

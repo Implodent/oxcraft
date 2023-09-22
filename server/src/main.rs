@@ -30,13 +30,13 @@ use oxcr_protocol::{
         },
         Difficulty, State, VarInt, PROTOCOL_VERSION,
     },
-    nbt::{nbt_serde, Nbt, NbtSerde},
+    nbt::{nbt_serde, Nbt, NbtList, NbtTagType},
     rwlock_set,
     ser::{Array, Identifier, Json, Namespace},
     uuid::Uuid,
     AsyncSet, PlayerN, PlayerNet, ProtocolPlugin,
 };
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, sync::mpsc};
 use tracing::instrument;
 use tracing_subscriber::EnvFilter;
@@ -44,7 +44,7 @@ use tracing_subscriber::EnvFilter;
 use crate::{
     error::Error,
     model::{
-        ChatType, Player, PlayerBundle, PlayerGameMode, PlayerName, PlayerUuid, WorldgenBiome,
+        Player, PlayerBundle, PlayerGameMode, PlayerName, PlayerUuid, WorldgenBiome,
     },
 };
 

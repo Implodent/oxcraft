@@ -40,8 +40,8 @@ impl Packet for StatusResponse {
 }
 
 impl Serialize for StatusResponse {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
-        self.json_response.serialize_to(buf);
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
+        self.json_response.serialize_to(buf)
     }
 }
 
@@ -108,7 +108,8 @@ impl Packet for PongResponse {
     const STATE: crate::model::State = State::Status;
 }
 impl Serialize for PongResponse {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
         buf.put_i64(self.payload);
+        Ok(())
     }
 }

@@ -23,8 +23,8 @@ impl Packet for DisconnectPlay {
 }
 
 impl Serialize for DisconnectPlay {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
-        self.reason.serialize_to(buf);
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
+        self.reason.serialize_to(buf)
     }
 }
 
@@ -96,8 +96,9 @@ pub enum GameMode {
 }
 
 impl Serialize for GameMode {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
         buf.put_u8(*self as u8);
+        Ok(())
     }
 }
 
@@ -117,11 +118,12 @@ pub enum PreviousGameMode {
     Normal(GameMode),
 }
 impl Serialize for PreviousGameMode {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
         buf.put_i8(match self {
             Self::Undefined => -1,
             Self::Normal(gamemode) => *gamemode as i8,
         });
+        Ok(())
     }
 }
 impl Deserialize for PreviousGameMode {

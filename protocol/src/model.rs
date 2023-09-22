@@ -31,8 +31,9 @@ pub enum Difficulty {
 }
 
 impl Serialize for Difficulty {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
-        buf.put_u8(*self as _)
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
+        buf.put_u8(*self as _);
+        Ok(())
     }
 }
 

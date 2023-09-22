@@ -116,10 +116,11 @@ impl<T: LEB128Number> Deserialize for VarInt<T> {
 }
 
 impl<T: LEB128Number> Serialize for VarInt<T> {
-    fn serialize(&self) -> Bytes {
-        self.0.write()
+    fn serialize(&self) -> Result<Bytes, crate::error::Error> {
+        Ok(self.0.write())
     }
-    fn serialize_to(&self, buf: &mut BytesMut) {
-        self.0.write_to(buf)
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        self.0.write_to(buf);
+        Ok(())
     }
 }

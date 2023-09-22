@@ -55,11 +55,11 @@ pub struct SerializedPacket {
 }
 
 impl SerializedPacket {
-    pub fn new<P: Packet + Serialize>(packet: P) -> Result<Self, crate::error::Error> {
+    pub fn new<P: Packet + Serialize>(packet: P) -> Result<Self, Error> {
         Self::new_ref(&packet)
     }
 
-    pub fn new_ref<P: Packet + Serialize>(packet: &P) -> Result<Self, crate::error::Error> {
+    pub fn new_ref<P: Packet + Serialize>(packet: &P) -> Result<Self, Error> {
         try {
             let data = packet.serialize()?;
             let id = P::ID;
@@ -71,7 +71,7 @@ impl SerializedPacket {
     pub fn try_deserialize<P: Packet + Deserialize<Context = PacketContext>>(
         &self,
         state: State,
-    ) -> Result<P, crate::error::Error> {
+    ) -> Result<P, Error> {
         let context = PacketContext { id: self.id, state };
 
         P::deserialize
@@ -105,16 +105,16 @@ impl Deserialize for SerializedPacket {
 }
 
 impl Serialize for SerializedPacket {
-    fn serialize_to(&self, buf: &mut BytesMut) {
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), Error> {
         let length = VarInt::<i32>(
             self.length
-                .try_into()
-                .expect("failed to serialize VarInt length"),
+                .try_into().map_err(|_| Error::VarIntTooBig)?
         );
         buf.reserve(length.length_of() + self.id.length_of() + self.data.len());
-        length.serialize_to(buf);
-        self.id.serialize_to(buf);
+        length.serialize_to(buf)?;
+        self.id.serialize_to(buf)?;
         buf.put_slice(&self.data);
+        Ok(())
     }
 }
 
