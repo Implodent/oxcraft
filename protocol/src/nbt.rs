@@ -7,6 +7,7 @@ use aott::{
 use bytes::{BufMut, BytesMut};
 use derive_more::*;
 use serde::{
+    de::{MapAccess, SeqAccess},
     ser::{
         SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
         SerializeTupleStruct, SerializeTupleVariant,
@@ -15,7 +16,7 @@ use serde::{
 };
 use std::collections::HashMap;
 
-use crate::{error::Error, explode, ser::*};
+use crate::ser::*;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
@@ -63,21 +64,16 @@ impl Nbt {
             match NbtTag::named(input)? {
                 NbtTag::End => break,
                 NbtTag::Named(NbtNamed { name, value, .. }) => map.insert(name, value),
-                NbtTag::List(_) => return Err(crate::error::Error::NbtFuckup),
+                NbtTag::List(NbtList { tags, .. }) => {
+                    return Err(crate::error::Error::Nbt(NbtError::Expected {
+                        expected: NbtExpected::NamedTag,
+                        actual: Nbt::List(tags),
+                    }))
+                }
             };
         }
 
         Ok(map)
-    }
-
-    fn jason_number(n: i64) -> Self {
-        n.try_into()
-            .map(Self::Byte)
-            .or(n
-                .try_into()
-                .map(Self::Short)
-                .or(n.try_into().map(Self::Int)))
-            .unwrap_or_else(|_| Self::Long(n))
     }
 
     fn tag(&self) -> NbtTagType {
@@ -209,10 +205,8 @@ impl NbtTag {
         Ok(Self::Named(NbtNamed {
             tag,
             name,
-            value: with_context(Nbt::single, tag)(input)?.unwrap_or_else(
-                || // SAFETY: end tag type was handled beforehand, so we can safely explode here
-                                                                         explode!(),
-            ),
+            // SAFETY: end tag type was handled beforehand, so we can safely explode here
+            value: unsafe { with_context(Nbt::single, tag)(input)?.unwrap_unchecked() },
         }))
     }
 
@@ -221,7 +215,7 @@ impl NbtTag {
         let tag = nbt_tag(input)?;
 
         if tag == NbtTagType::End {
-            return Err(crate::error::Error::NbtFuckup);
+            return Err(crate::error::Error::Nbt(NbtError::ExpectedAnythingButEnd));
         }
 
         let length = b::number::big::i32(input)?;
@@ -230,7 +224,9 @@ impl NbtTag {
 
         let tags = with_context(
             Nbt::single
-                .try_map(|v: Option<Nbt>| v.ok_or(crate::error::Error::NbtFuckup))
+                .try_map(|v: Option<Nbt>| {
+                    v.ok_or(crate::error::Error::Nbt(NbtError::ExpectedAnythingButEnd))
+                })
                 .repeated()
                 .exactly(length),
             tag,
@@ -323,25 +319,26 @@ impl<T: Serialize> Serialize for SmolArray<T> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NbtJson<T>(pub T);
+pub struct NbtSerde<T>(pub T);
 
-impl<T: serde::Serialize> Serialize for NbtJson<T> {
+impl<T: serde::Serialize> Serialize for NbtSerde<T> {
     fn serialize_to(&self, buf: &mut BytesMut) {
-        let r: Result<(), crate::error::Error> = try {
-            nbt_serde(&self.0)
-                .map_err(|_| Error::NbtFuckup)?
-                .serialize_value(buf)
-        };
+        let r: Result<(), crate::error::Error> = try { nbt_serde(&self.0)?.serialize_value(buf) };
         r.unwrap()
     }
 }
 
-impl<'de, T: serde::de::Deserialize<'de>> Deserialize for NbtJson<T> {
+impl<T: for<'de> serde::de::Deserialize<'de>> Deserialize for NbtSerde<T> {
     fn deserialize<'a>(
         input: &mut aott::prelude::Input<&'a [u8], Extra<Self::Context>>,
     ) -> aott::PResult<&'a [u8], Self, Extra<Self::Context>> {
-        let tag = with_context(Nbt::single, NbtTagType::Compound)(input)?;
-        todo!()
+        let Some(tag) = with_context(Nbt::single, NbtTagType::Compound)(input)? else {
+            return Err(NbtError::ExpectedAnythingButEnd.into());
+        };
+
+        T::deserialize(NbtDe { input: &tag })
+            .map(Self)
+            .map_err(Into::into)
     }
 }
 
@@ -367,7 +364,7 @@ mod tests {
 
     fn test_nbt_json<T: serde::Serialize + std::fmt::Debug>(json: T, bytes: &[u8]) {
         eprintln!("testing {json:?}");
-        let nj = NbtJson(json);
+        let nj = NbtSer(json);
         let buf = nj.serialize();
         let buff = &buf[..];
         eprintln!(" left = {buff:x?}\nright = {bytes:x?}");
@@ -437,18 +434,18 @@ mod tests {
     }
 }
 
-struct NbtSerde;
+struct NbtSer;
 
-impl Serializer for NbtSerde {
+impl Serializer for NbtSer {
     type Ok = Nbt;
-    type Error = Void;
-    type SerializeMap = NbtSerdeMap;
-    type SerializeSeq = NbtSerdeSeq;
-    type SerializeStruct = NbtSerdeMap;
-    type SerializeStructVariant = NbtSerdeMap;
-    type SerializeTuple = NbtSerdeSeq;
-    type SerializeTupleStruct = NbtSerdeSeq;
-    type SerializeTupleVariant = NbtSerdeSeq;
+    type Error = NbtError;
+    type SerializeMap = NbtSerMap;
+    type SerializeSeq = NbtSerSeq;
+    type SerializeStruct = NbtSerMap;
+    type SerializeStructVariant = NbtSerMap;
+    type SerializeTuple = NbtSerSeq;
+    type SerializeTupleStruct = NbtSerSeq;
+    type SerializeTupleVariant = NbtSerSeq;
 
     fn is_human_readable(&self) -> bool {
         false
@@ -461,7 +458,13 @@ impl Serializer for NbtSerde {
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
         Ok(Nbt::ByteArray(
             v.into_iter()
-                .map(|b| (*b).try_into().map_err(|_| Void))
+                .map(|b| {
+                    (*b).try_into().map_err(|_| NbtError::OutOfBounds {
+                        value: format!("{b}u8"),
+                        actual_type: "u8",
+                        type_for_nbt: "i8",
+                    })
+                })
                 .try_collect()?,
         ))
     }
@@ -479,7 +482,7 @@ impl Serializer for NbtSerde {
     }
 
     fn serialize_i128(self, _unsupported: i128) -> Result<Self::Ok, Self::Error> {
-        Err(Void)
+        Err(NbtError::UnsupportedType("i128", Some("NBT does not have a 128-bit number type. Store it as 2 longs - 64 least significant bits, and 64 most significant bits.")))
     }
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
@@ -499,7 +502,7 @@ impl Serializer for NbtSerde {
     }
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        Ok(NbtSerdeMap(
+        Ok(NbtSerMap(
             len.map(HashMap::with_capacity).unwrap_or_else(HashMap::new),
             None,
             None,
@@ -508,7 +511,7 @@ impl Serializer for NbtSerde {
 
     fn serialize_newtype_struct<T: ?Sized>(
         self,
-        name: &'static str,
+        _name: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
@@ -519,8 +522,8 @@ impl Serializer for NbtSerde {
 
     fn serialize_newtype_variant<T: ?Sized>(
         self,
-        name: &'static str,
-        variant_index: u32,
+        _name: &'static str,
+        _variant_index: u32,
         variant: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
@@ -534,11 +537,14 @@ impl Serializer for NbtSerde {
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        Err(Void)
+        Err(NbtError::UnsupportedType(
+            "null",
+            Some("NBT does not support nulls"),
+        ))
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        Ok(NbtSerdeSeq(
+        Ok(NbtSerSeq(
             len.map(Vec::with_capacity).unwrap_or_else(Vec::new),
             None,
         ))
@@ -560,7 +566,7 @@ impl Serializer for NbtSerde {
         _name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        Ok(NbtSerdeMap(HashMap::with_capacity(len), None, None))
+        Ok(NbtSerMap(HashMap::with_capacity(len), None, None))
     }
 
     fn serialize_struct_variant(
@@ -570,15 +576,11 @@ impl Serializer for NbtSerde {
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        Ok(NbtSerdeMap(
-            HashMap::with_capacity(len),
-            Some(variant),
-            None,
-        ))
+        Ok(NbtSerMap(HashMap::with_capacity(len), Some(variant), None))
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        Ok(NbtSerdeSeq(Vec::with_capacity(len), None))
+        Ok(NbtSerSeq(Vec::with_capacity(len), None))
     }
 
     fn serialize_tuple_struct(
@@ -586,7 +588,7 @@ impl Serializer for NbtSerde {
         _name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        Ok(NbtSerdeSeq(Vec::with_capacity(len), None))
+        Ok(NbtSerSeq(Vec::with_capacity(len), None))
     }
 
     fn serialize_tuple_variant(
@@ -596,7 +598,7 @@ impl Serializer for NbtSerde {
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        Ok(NbtSerdeSeq(Vec::with_capacity(len), Some(variant)))
+        Ok(NbtSerSeq(Vec::with_capacity(len), Some(variant)))
     }
 
     fn collect_map<K, V, I>(self, iter: I) -> Result<Self::Ok, Self::Error>
@@ -607,9 +609,9 @@ impl Serializer for NbtSerde {
     {
         Ok(Nbt::Compound(
             iter.into_iter()
-                .map(|(key, value)| match key.serialize(NbtSerde)? {
-                    Nbt::String(s) => Ok((s, value.serialize(NbtSerde)?)),
-                    _ => Err(Void),
+                .map(|(key, value)| match key.serialize(NbtSer)? {
+                    Nbt::String(s) => Ok((s, value.serialize(NbtSer)?)),
+                    actual_key => Err(NbtError::InvalidKey(actual_key)),
                 })
                 .try_collect()?,
         ))
@@ -621,7 +623,7 @@ impl Serializer for NbtSerde {
         <I as IntoIterator>::Item: serde::Serialize,
     {
         iter.into_iter()
-            .map(|thing| serde::Serialize::serialize(&thing, NbtSerde))
+            .map(|thing| serde::Serialize::serialize(&thing, NbtSer))
             .try_collect::<Vec<Nbt>>()
             .map(Nbt::List)
     }
@@ -633,32 +635,59 @@ impl Serializer for NbtSerde {
         Ok(Nbt::String(value.to_string()))
     }
 
-    fn serialize_u128(self, v: u128) -> Result<Self::Ok, Self::Error> {
-        Err(Void)
+    fn serialize_u128(self, _v: u128) -> Result<Self::Ok, Self::Error> {
+        Err(NbtError::UnsupportedType("u128", Some("NBT does not support unsigned integers, and even 128-bit numbers. Store it as 2 longs - 64 LSBs, and 64 MSBs.")))
     }
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
-        v.try_into().map_err(|_| Void).map(Nbt::Byte)
+        v.try_into()
+            .map_err(|_| NbtError::OutOfBounds {
+                value: format!("{v}u8"),
+                actual_type: "u8",
+                type_for_nbt: "i8",
+            })
+            .map(Nbt::Byte)
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
-        v.try_into().map_err(|_| Void).map(Nbt::Short)
+        v.try_into()
+            .map_err(|_| NbtError::OutOfBounds {
+                value: format!("{v}u16"),
+                actual_type: "u16",
+                type_for_nbt: "i16",
+            })
+            .map(Nbt::Short)
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
-        v.try_into().map_err(|_| Void).map(Nbt::Int)
+        v.try_into()
+            .map_err(|_| NbtError::OutOfBounds {
+                value: format!("{v}u32"),
+                actual_type: "u32",
+                type_for_nbt: "i32",
+            })
+            .map(Nbt::Int)
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        v.try_into().map_err(|_| Void).map(Nbt::Long)
+        v.try_into()
+            .map_err(|_| NbtError::OutOfBounds {
+                value: format!("{v}u64"),
+                actual_type: "u64",
+                type_for_nbt: "i64",
+            })
+            .map(Nbt::Long)
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        Err(Void)
+        Err(NbtError::UnsupportedType(
+            "()",
+            Some("NBT does not support nulls, nor unit types."),
+        ))
     }
 
     fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
-        Err(Void)
+        self.serialize_unit()
     }
 
     fn serialize_unit_variant(
@@ -667,38 +696,141 @@ impl Serializer for NbtSerde {
         _variant_index: u32,
         _variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
-        Err(Void)
+        self.serialize_unit_struct(_name)
     }
 }
-pub struct NbtDe<'de> {
+
+struct NbtDe<'de> {
     input: &'de Nbt,
 }
 
-impl<'de> NbtDe<'de> {
-    pub fn from_nbt(input: &'de Nbt) -> Self {
-        Self { input }
+struct NbtDeMap<'de>(
+    std::collections::hash_map::Iter<'de, String, Nbt>,
+    Option<(&'de String, &'de Nbt)>,
+);
+
+impl<'de> MapAccess<'de> for NbtDeMap<'de> {
+    type Error = NbtError;
+
+    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
+    where
+        K: serde::de::DeserializeSeed<'de>,
+    {
+        let Some((next_key, next_value)) = self.0.next() else {
+            return Ok(None);
+        };
+        self.1.replace((next_key, next_value));
+        seed.deserialize(serde::de::value::StrDeserializer::new(next_key.as_str()))
+            .map(Some)
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::DeserializeSeed<'de>,
+    {
+        let Some((_next_key, next_value)) = self.1.take() else {
+            return Err(NbtError::NoKeyInMap);
+        };
+
+        seed.deserialize(NbtDe { input: next_value })
+    }
+
+    fn next_entry_seed<K, V>(
+        &mut self,
+        kseed: K,
+        vseed: V,
+    ) -> Result<Option<(K::Value, V::Value)>, Self::Error>
+    where
+        K: serde::de::DeserializeSeed<'de>,
+        V: serde::de::DeserializeSeed<'de>,
+    {
+        let Some((next_key, next_value)) = self.0.next() else {
+            return Ok(None);
+        };
+
+        Ok(Some((
+            kseed.deserialize(serde::de::value::StrDeserializer::new(next_key.as_str()))?,
+            vseed.deserialize(NbtDe { input: next_value })?,
+        )))
     }
 }
+
+macro_rules! declare_nbt_array_deserializer {
+    ($name:ident, $v:ty, $valty:ident) => {
+        struct $name<'de>(std::slice::Iter<'de, $v>, &'de [$v]);
+
+        impl<'de> SeqAccess<'de> for $name<'de> {
+            type Error = NbtError;
+
+            fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+            where
+                T: serde::de::DeserializeSeed<'de>,
+            {
+                let Some(value) = self.0.next() else {
+                    return Ok(None);
+                };
+
+                Ok(Some(seed.deserialize(serde::de::value::$valty::<
+                    Self::Error,
+                >::new(*value))?))
+            }
+
+            fn size_hint(&self) -> Option<usize> {
+                Some(self.1.len())
+            }
+        }
+    };
+}
+
+declare_nbt_array_deserializer!(NbtDeByteArray, i8, I8Deserializer);
+declare_nbt_array_deserializer!(NbtDeIntArray, i32, I32Deserializer);
+declare_nbt_array_deserializer!(NbtDeLongArray, i64, I64Deserializer);
+
+struct NbtDeList<'de>(std::slice::Iter<'de, Nbt>, &'de [Nbt]);
+
+impl<'de> SeqAccess<'de> for NbtDeList<'de> {
+    type Error = NbtError;
+
+    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+    where
+        T: serde::de::DeserializeSeed<'de>,
+    {
+        let Some(value) = self.0.next() else {
+            return Ok(None);
+        };
+
+        Ok(Some(seed.deserialize(NbtDe { input: value })?))
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.1.len())
+    }
+}
+
 impl<'de> Deserializer<'de> for NbtDe<'de> {
-    type Error = Void;
+    type Error = NbtError;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
         match self.input {
-            Nbt::Byte(byte) => self.deserialize_i8(visitor),
-            Nbt::Short(short) => self.deserialize_i16(visitor),
-            Nbt::Int(int) => self.deserialize_i32(visitor),
-            Nbt::Long(long) => self.deserialize_i64(visitor),
-            Nbt::Float(float) => self.deserialize_f32(visitor),
-            Nbt::Double(double) => self.deserialize_f64(visitor),
-            Nbt::ByteArray(byte_vec) => self.deserialize_byte_buf(visitor),
-            Nbt::String(s) => self.deserialize_string(visitor),
-            Nbt::List(vec) => self.deserialize_seq(visitor),
-            Nbt::Compound(map) => self.deserialize_map(visitor),
-            Nbt::IntArray(int_vec) => self.deserialize_seq(visitor),
-            Nbt::LongArray(long_vec) => self.deserialize_seq(visitor),
+            Nbt::Byte(byte) => visitor.visit_i8(*byte),
+            Nbt::Short(short) => visitor.visit_i16(*short),
+            Nbt::Int(int) => visitor.visit_i32(*int),
+            Nbt::Long(long) => visitor.visit_i64(*long),
+            Nbt::Float(float) => visitor.visit_f32(*float),
+            Nbt::Double(double) => visitor.visit_f64(*double),
+            Nbt::ByteArray(bytes) => visitor.visit_seq(NbtDeByteArray(bytes.iter(), &bytes[..])),
+            Nbt::String(s) => visitor.visit_borrowed_str(s.as_str()),
+            Nbt::List(list) => visitor.visit_seq(NbtDeList(list.iter(), &list[..])),
+            Nbt::Compound(compound) => visitor.visit_map(NbtDeMap(compound.iter(), None)),
+            Nbt::IntArray(int_array) => {
+                visitor.visit_seq(NbtDeIntArray(int_array.iter(), &int_array[..]))
+            }
+            Nbt::LongArray(long_array) => {
+                visitor.visit_seq(NbtDeLongArray(long_array.iter(), &long_array[..]))
+            }
         }
     }
 
@@ -709,7 +841,12 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         visitor.visit_bool(match self.input {
             Nbt::Byte(0) => false,
             Nbt::Byte(1) => true,
-            _ => return Err(Void),
+            actual => {
+                return Err(NbtError::Expected {
+                    expected: NbtExpected::AnyOf(vec![Nbt::Byte(0), Nbt::Byte(1)]),
+                    actual: actual.clone(),
+                })
+            }
         })
     }
 
@@ -720,7 +857,10 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         if let Nbt::Byte(byte) = self.input {
             visitor.visit_i8(*byte)
         } else {
-            Err(Void)
+            Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::Byte),
+                actual: self.input.clone(),
+            })
         }
     }
 
@@ -731,7 +871,10 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         if let Nbt::Short(short) = self.input {
             visitor.visit_i16(*short)
         } else {
-            Err(Void)
+            Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::Short),
+                actual: self.input.clone(),
+            })
         }
     }
 
@@ -742,7 +885,10 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         if let Nbt::Int(int) = self.input {
             visitor.visit_i32(*int)
         } else {
-            Err(Void)
+            Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::Int),
+                actual: self.input.clone(),
+            })
         }
     }
 
@@ -753,7 +899,10 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         if let Nbt::Long(long) = self.input {
             visitor.visit_i64(*long)
         } else {
-            Err(Void)
+            Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::Long),
+                actual: self.input.clone(),
+            })
         }
     }
 
@@ -763,7 +912,10 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
     {
         match self.input {
             Nbt::Byte(byte) if *byte >= 0 => visitor.visit_u8(*byte as u8),
-            _ => Err(Void),
+            actual => Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::Byte),
+                actual: actual.clone(),
+            }),
         }
     }
 
@@ -773,7 +925,10 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
     {
         match self.input {
             Nbt::Short(short) if *short >= 0 => visitor.visit_u16(*short as u16),
-            _ => Err(Void),
+            actual => Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::Short),
+                actual: actual.clone(),
+            }),
         }
     }
 
@@ -783,7 +938,10 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
     {
         match self.input {
             Nbt::Int(int) if *int >= 0 => visitor.visit_u32(*int as u32),
-            _ => Err(Void),
+            actual => Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::Int),
+                actual: actual.clone(),
+            }),
         }
     }
 
@@ -793,7 +951,10 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
     {
         match self.input {
             Nbt::Long(long) if *long >= 0 => visitor.visit_u64(*long as u64),
-            _ => Err(Void),
+            actual => Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::Long),
+                actual: actual.clone(),
+            }),
         }
     }
 
@@ -804,7 +965,10 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         if let Nbt::Float(float) = self.input {
             visitor.visit_f32(*float)
         } else {
-            Err(Void)
+            Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::Float),
+                actual: self.input.clone(),
+            })
         }
     }
 
@@ -815,7 +979,10 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         if let Nbt::Double(double) = self.input {
             visitor.visit_f64(*double)
         } else {
-            Err(Void)
+            Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::Double),
+                actual: self.input.clone(),
+            })
         }
     }
 
@@ -824,10 +991,17 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         V: serde::de::Visitor<'de>,
     {
         match self.input {
-            Nbt::Int(int) if *int >= 0 => {
-                visitor.visit_char((*int as u32).try_into().map_err(|_| Void)?)
-            }
-            _ => Err(Void),
+            Nbt::Int(int) if *int >= 0 => visitor.visit_char((*int as u32).try_into().map_err(
+                |_| NbtError::OutOfBounds {
+                    value: format!("{int}i32"),
+                    actual_type: "i32",
+                    type_for_nbt: "char",
+                },
+            )?),
+            actual => Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::Int),
+                actual: actual.clone(),
+            }),
         }
     }
 
@@ -835,116 +1009,153 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        if let Nbt::String(ref string) = self.input {
+            visitor.visit_str(string.as_str())
+        } else {
+            Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::String),
+                actual: self.input.clone(),
+            })
+        }
     }
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        if let Nbt::String(string) = self.input {
+            visitor.visit_string(string.clone())
+        } else {
+            Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::String),
+                actual: self.input.clone(),
+            })
+        }
     }
 
-    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_bytes<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        Err(NbtError::UnsupportedType(
+            "&[u8]",
+            Some("NBT does not have an unsigned byte type"),
+        ))
     }
 
-    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_byte_buf<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        Err(NbtError::UnsupportedType(
+            "Vec<u8>",
+            Some("NBT does not have an unsigned byte type"),
+        ))
     }
 
-    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_option<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        Err(NbtError::UnsupportedType("Option", Some("NBT does not suport nulls, so just use `#[serde(skip_serializing_if = \"Option::is_none\")]`")))
     }
 
-    fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_unit<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        Err(NbtError::UnsupportedType(
+            "()",
+            Some("NBT does not support nulls nor unit types."),
+        ))
     }
 
     fn deserialize_unit_struct<V>(
         self,
-        name: &'static str,
+        _name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        self.deserialize_unit(visitor)
     }
 
     fn deserialize_newtype_struct<V>(
         self,
-        name: &'static str,
+        _name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        visitor.visit_newtype_struct(self)
     }
 
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        if let Nbt::List(list) = self.input {
+            visitor.visit_seq(NbtDeList(list.iter(), list))
+        } else {
+            Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::List),
+                actual: self.input.clone(),
+            })
+        }
     }
 
-    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        self.deserialize_seq(visitor)
     }
 
     fn deserialize_tuple_struct<V>(
         self,
-        name: &'static str,
+        _name: &'static str,
         len: usize,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        self.deserialize_tuple(len, visitor)
     }
 
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        if let Nbt::Compound(compound) = self.input {
+            visitor.visit_map(NbtDeMap(compound.iter(), None))
+        } else {
+            Err(NbtError::Expected {
+                expected: NbtExpected::Type(NbtTagType::Compound),
+                actual: self.input.clone(),
+            })
+        }
     }
 
     fn deserialize_struct<V>(
         self,
-        name: &'static str,
-        fields: &'static [&'static str],
+        _name: &'static str,
+        _fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        self.deserialize_map(visitor)
     }
 
     fn deserialize_enum<V>(
         self,
-        name: &'static str,
-        variants: &'static [&'static str],
-        visitor: V,
+        _name: &'static str,
+        _variants: &'static [&'static str],
+        _visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
@@ -952,57 +1163,56 @@ impl<'de> Deserializer<'de> for NbtDe<'de> {
         todo!()
     }
 
-    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_identifier<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
         todo!()
     }
 
-    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_ignored_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        Err(NbtError::UnsupportedType(
+            "IgnoredAny",
+            Some("NBT does not support nulls and IgnoredAny is confusing aaaaa help please"),
+        ))
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-#[error("")]
-pub struct Void;
-
-impl serde::ser::Error for Void {
-    fn custom<T>(_msg: T) -> Self
-    where
-        T: std::fmt::Display,
-    {
-        Self
-    }
-}
-
-impl serde::de::Error for Void {
+impl serde::ser::Error for NbtError {
     fn custom<T>(msg: T) -> Self
     where
         T: std::fmt::Display,
     {
-        Self
+        NbtError::SerdeCustom(msg.to_string())
     }
 }
 
-struct NbtSerdeMap(HashMap<String, Nbt>, Option<&'static str>, Option<String>);
+impl serde::de::Error for NbtError {
+    fn custom<T>(msg: T) -> Self
+    where
+        T: std::fmt::Display,
+    {
+        NbtError::SerdeCustom(msg.to_string())
+    }
+}
 
-impl SerializeMap for NbtSerdeMap {
+struct NbtSerMap(HashMap<String, Nbt>, Option<&'static str>, Option<String>);
+
+impl SerializeMap for NbtSerMap {
     type Ok = Nbt;
-    type Error = Void;
+    type Error = NbtError;
 
     fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error>
     where
         T: serde::Serialize,
     {
-        let keyy = key.serialize(NbtSerde)?;
-        match keyy {
+        let serialized_key = key.serialize(NbtSer)?;
+        match serialized_key {
             Nbt::String(s) => Ok(self.2.replace(s).map(|_| ()).unwrap_or(())),
-            _ => Err(Void),
+            actual_key => Err(NbtError::InvalidKey(actual_key)),
         }
     }
 
@@ -1010,8 +1220,10 @@ impl SerializeMap for NbtSerdeMap {
     where
         T: serde::Serialize,
     {
-        self.0
-            .insert(self.2.take().ok_or(Void)?, value.serialize(NbtSerde)?);
+        self.0.insert(
+            self.2.take().ok_or(NbtError::NoKeyInMap)?,
+            value.serialize(NbtSer)?,
+        );
         Ok(())
     }
 
@@ -1026,9 +1238,9 @@ impl SerializeMap for NbtSerdeMap {
     }
 }
 
-impl SerializeStruct for NbtSerdeMap {
+impl SerializeStruct for NbtSerMap {
     type Ok = Nbt;
-    type Error = Void;
+    type Error = NbtError;
 
     fn serialize_field<T: ?Sized>(
         &mut self,
@@ -1038,7 +1250,7 @@ impl SerializeStruct for NbtSerdeMap {
     where
         T: serde::Serialize,
     {
-        self.0.insert(key.to_string(), value.serialize(NbtSerde)?);
+        self.0.insert(key.to_string(), value.serialize(NbtSer)?);
         Ok(())
     }
 
@@ -1057,9 +1269,9 @@ impl SerializeStruct for NbtSerdeMap {
     }
 }
 
-impl SerializeStructVariant for NbtSerdeMap {
+impl SerializeStructVariant for NbtSerMap {
     type Ok = Nbt;
-    type Error = Void;
+    type Error = NbtError;
 
     fn serialize_field<T: ?Sized>(
         &mut self,
@@ -1069,7 +1281,7 @@ impl SerializeStructVariant for NbtSerdeMap {
     where
         T: serde::Serialize,
     {
-        self.0.insert(key.to_string(), value.serialize(NbtSerde)?);
+        self.0.insert(key.to_string(), value.serialize(NbtSer)?);
         Ok(())
     }
 
@@ -1088,17 +1300,17 @@ impl SerializeStructVariant for NbtSerdeMap {
     }
 }
 
-struct NbtSerdeSeq(Vec<Nbt>, Option<&'static str>);
+struct NbtSerSeq(Vec<Nbt>, Option<&'static str>);
 
-impl SerializeSeq for NbtSerdeSeq {
+impl SerializeSeq for NbtSerSeq {
     type Ok = Nbt;
-    type Error = Void;
+    type Error = NbtError;
 
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
     where
         T: serde::Serialize,
     {
-        value.serialize(NbtSerde).map(|v| self.0.push(v))
+        value.serialize(NbtSer).map(|v| self.0.push(v))
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
@@ -1109,9 +1321,9 @@ impl SerializeSeq for NbtSerdeSeq {
     }
 }
 
-impl SerializeTuple for NbtSerdeSeq {
+impl SerializeTuple for NbtSerSeq {
     type Ok = Nbt;
-    type Error = Void;
+    type Error = NbtError;
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
         Ok(match self.1 {
@@ -1124,13 +1336,13 @@ impl SerializeTuple for NbtSerdeSeq {
     where
         T: serde::Serialize,
     {
-        value.serialize(NbtSerde).map(|v| self.0.push(v))
+        value.serialize(NbtSer).map(|v| self.0.push(v))
     }
 }
 
-impl SerializeTupleStruct for NbtSerdeSeq {
+impl SerializeTupleStruct for NbtSerSeq {
     type Ok = Nbt;
-    type Error = Void;
+    type Error = NbtError;
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
         Ok(match self.1 {
@@ -1143,13 +1355,13 @@ impl SerializeTupleStruct for NbtSerdeSeq {
     where
         T: serde::Serialize,
     {
-        value.serialize(NbtSerde).map(|v| self.0.push(v))
+        value.serialize(NbtSer).map(|v| self.0.push(v))
     }
 }
 
-impl SerializeTupleVariant for NbtSerdeSeq {
+impl SerializeTupleVariant for NbtSerSeq {
     type Ok = Nbt;
-    type Error = Void;
+    type Error = NbtError;
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
         Ok(match self.1 {
@@ -1162,20 +1374,81 @@ impl SerializeTupleVariant for NbtSerdeSeq {
     where
         T: serde::Serialize,
     {
-        value.serialize(NbtSerde).map(|v| self.0.push(v))
+        value.serialize(NbtSer).map(|v| self.0.push(v))
     }
 }
 
-pub fn nbt_serde<T: serde::Serialize>(value: &T) -> Result<Nbt, ()> {
-    value.serialize(NbtSerde).map_err(|_| ())
+pub fn nbt_serde<T: serde::Serialize>(value: &T) -> Result<Nbt, NbtError> {
+    value.serialize(NbtSer)
 }
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
 pub enum NbtError {
-    #[error("Unsupported type for NBT: u128")]
+    #[error("Unsupported type for NBT: {_0}")]
     #[diagnostic(
-        code(protocol::nbt::error::unsupported_type_u128),
-        help("NBT does not support types like u128, serialize it as 2 longs (LongArray)")
+        code(nbt::error::unsupported_type),
+        url("https://wiki.vg/NBT#Specification")
     )]
-    UnsupportedTypeU128,
+    UnsupportedType(&'static str, #[help] Option<&'static str>),
+
+    #[error("{_0}")]
+    #[diagnostic(code(nbt::error::serde_custom_error))]
+    SerdeCustom(String),
+
+    #[error("{value} of type {actual_type} is out of bounds for NBT (tried to convert to {type_for_nbt})")]
+    #[diagnostic(
+        code(nbt::error::out_of_bounds),
+        url("https://wiki.vg/NBT#Specification"),
+        help(
+            "NBT does not support unsigned types,\
+              and because of that this NBT implementation converts them to signed types.\
+              If an unsigned value is out of bounds for the signed type,\
+              this error is returned."
+        )
+    )]
+    OutOfBounds {
+        value: String,
+        actual_type: &'static str,
+        type_for_nbt: &'static str,
+    },
+
+    #[error("{_0:?} is an invalid key for a NBT Compound.")]
+    #[diagnostic(
+        code(nbt::error::invalid_key_for_compound),
+        url("https://wiki.vg/NBT#Specification"),
+        help(
+            "NBT Compounds are like JSON objects,\
+              or a HashMap with String keys and Nbt values.\
+              As such, keys for NBT Compounds can only be Strings,\
+              and if a key is not a Nbt::String, this error is returned with the actual value of the key."
+        )
+    )]
+    InvalidKey(Nbt),
+
+    #[error("expected {expected}, actual: {actual:?}")]
+    #[diagnostic(code(nbt::error::expected))]
+    Expected { expected: NbtExpected, actual: Nbt },
+
+    #[error("a call to serialize_value (when serializing a map) was not preceded by a call to serialize_key")]
+    #[diagnostic(
+        code(nbt::error::no_key_in_map),
+        help("call serialize_key before calling serialize_value")
+    )]
+    NoKeyInMap,
+
+    #[error("expected **anything** but TAG_End")]
+    #[diagnostic(code(nbt::error::anything_but_end))]
+    ExpectedAnythingButEnd,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum NbtExpected {
+    #[error("{}", crate::ser::any_of(.0))]
+    AnyOf(Vec<Nbt>),
+
+    #[error("{_0:?}")]
+    Type(NbtTagType),
+
+    #[error("a named tag or TAG_End")]
+    NamedTag,
 }

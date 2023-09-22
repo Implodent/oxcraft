@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use crate::nsfr::{i12, i26};
 use derive_more::*;
-use miette::SourceSpan;
+use miette::{NamedSource, SourceSpan};
 use std::{
     borrow::Cow,
     fmt::{Debug, Display},
@@ -37,7 +37,7 @@ pub trait Serialize {
     fn serialize_to(&self, buf: &mut BytesMut);
 }
 
-fn any_of<T: Debug>(v: &[T]) -> String {
+pub fn any_of<T: Debug>(v: &[T]) -> String {
     match v {
         [el] => format!("{el:?}"),
         elements => format!("any of {elements:?}"),
@@ -47,20 +47,42 @@ fn any_of<T: Debug>(v: &[T]) -> String {
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
 pub enum SerializationErrorKind<Item: Debug> {
     #[error("expected {}, found {found:?}", any_of(.expected))]
-    #[diagnostic(code(protocol::ser::error::expected))]
+    #[diagnostic(code(aott::error::expected), help("invalid inputs encountered - try looking at it more and check if you got something wrong."))]
     Expected { expected: Vec<Item>, found: Item },
     #[error("unexpected end of file")]
-    UnexpectedEof,
+    #[diagnostic(
+        code(aott::error::unexpected_eof),
+        help("there wasn't enough input to deserialize, try giving more next time.")
+    )]
+    UnexpectedEof { expected: Option<Vec<Item>> },
+    #[error("expected end of file, found {found:?}")]
+    #[diagnostic(
+        code(aott::error::expected_eof),
+        help("more input was given than expected, try revising your inputs.")
+    )]
+    ExpectedEof { found: Item },
 }
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
 #[error("{kind}")]
 pub struct SerializationError<Item: Debug + 'static> {
     #[label = "here"]
-    pub here: SourceSpan,
+    pub span: SourceSpan,
     #[diagnostic(transparent)]
     #[source]
+    #[diagnostic_source]
     pub kind: SerializationErrorKind<Item>,
+}
+
+#[derive(thiserror::Error, miette::Diagnostic, Debug)]
+#[error("{error}")]
+pub struct WithSource<Item: Debug + 'static> {
+    #[source_code]
+    pub source: NamedSource,
+    #[diagnostic(transparent)]
+    #[source]
+    #[diagnostic_source]
+    pub error: SerializationError<Item>,
 }
 
 pub struct Extra<C>(PhantomData<C>);
@@ -74,62 +96,80 @@ impl<'a> Error<&'a [u8]> for crate::error::Error {
         span: Self::Span,
         found: aott::MaybeRef<'_, <&'a [u8] as InputType>::Token>,
     ) -> Self {
-        Self::Ser(
-            <extra::Simple<u8> as aott::error::Error<&'a [u8]>>::expected_eof_found(span, found),
-        )
+        Self::Ser(SerializationError {
+            span: span.into(),
+            kind: SerializationErrorKind::ExpectedEof {
+                found: found.into_clone(),
+            },
+        })
     }
+
     fn expected_token_found(
         span: Self::Span,
         expected: Vec<<&'a [u8] as InputType>::Token>,
         found: aott::MaybeRef<'_, <&'a [u8] as InputType>::Token>,
     ) -> Self {
-        Self::Ser(
-            <extra::Simple<u8> as aott::error::Error<&'a [u8]>>::expected_token_found(
-                span, expected, found,
-            ),
-        )
+        Self::Ser(SerializationError {
+            span: span.into(),
+            kind: SerializationErrorKind::Expected {
+                expected,
+                found: found.into_clone(),
+            },
+        })
     }
+
     fn unexpected_eof(
         span: Self::Span,
         expected: Option<Vec<<&'a [u8] as InputType>::Token>>,
     ) -> Self {
-        Self::Ser(
-            <extra::Simple<u8> as aott::error::Error<&'a [u8]>>::unexpected_eof(span, expected),
-        )
+        Self::Ser(SerializationError {
+            span: span.into(),
+            kind: SerializationErrorKind::UnexpectedEof { expected },
+        })
     }
 }
+
 impl<'a, C> ParserExtras<&'a str> for Extra<C> {
     type Context = C;
     type Error = crate::error::Error;
 }
+
 impl<'a> Error<&'a str> for crate::error::Error {
     type Span = Range<usize>;
     fn expected_eof_found(
         span: Self::Span,
         found: aott::MaybeRef<'_, <&'a str as InputType>::Token>,
     ) -> Self {
-        Self::SerStr(
-            <extra::Simple<char> as aott::error::Error<&'a str>>::expected_eof_found(span, found),
-        )
+        Self::SerStr(SerializationError {
+            span: span.into(),
+            kind: SerializationErrorKind::ExpectedEof {
+                found: found.into_clone(),
+            },
+        })
     }
+
     fn expected_token_found(
         span: Self::Span,
         expected: Vec<<&'a str as InputType>::Token>,
         found: aott::MaybeRef<'_, <&'a str as InputType>::Token>,
     ) -> Self {
-        Self::SerStr(
-            <extra::Simple<char> as aott::error::Error<&'a str>>::expected_token_found(
-                span, expected, found,
-            ),
-        )
+        Self::SerStr(SerializationError {
+            span: span.into(),
+            kind: SerializationErrorKind::Expected {
+                expected,
+                found: found.into_clone(),
+            },
+        })
     }
+
     fn unexpected_eof(
         span: Self::Span,
         expected: Option<Vec<<&'a str as InputType>::Token>>,
     ) -> Self {
-        Self::SerStr(
-            <extra::Simple<char> as aott::error::Error<&'a str>>::unexpected_eof(span, expected),
-        )
+        Self::SerStr(SerializationError {
+            span: span.into(),
+            kind: SerializationErrorKind::UnexpectedEof { expected },
+        })
     }
 }
 

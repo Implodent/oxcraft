@@ -28,21 +28,6 @@ pub mod serde {
 }
 pub use miette;
 
-/// Equivalent of Zig's `unreachable` in ReleaseFast/ReleaseSmall mode
-#[macro_export]
-macro_rules! explode {
-    () => {{
-        #[cfg(not(debug_assertions))]
-        unsafe {
-            std::hint::unreachable_unchecked()
-        }
-        #[cfg(debug_assertions)]
-        {
-            unreachable!()
-        }
-    }};
-}
-
 pub async fn rwlock_set<T: 'static>(rwlock: &RwLock<T>, value: T) {
     rwlock.set(value).await
 }

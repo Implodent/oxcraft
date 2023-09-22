@@ -1,10 +1,13 @@
 use oxcr_protocol::error::Error as NetError;
+use oxcr_protocol::miette;
 
-#[derive(oxcr_protocol::thiserror::Error, Debug)]
+#[derive(oxcr_protocol::thiserror::Error, miette::Diagnostic, Debug)]
 pub enum Error {
     #[error("{_0}")]
+    #[diagnostic(transparent)]
     Net(NetError),
     #[error("Incorrect protocol version: {_0}")]
+    #[diagnostic(code(server::error::incorrect_protocol_version))]
     IncorrectVersion(i32), // #[error("duplicate player IP")]
                            // DupePlayer,
 }

@@ -1,6 +1,6 @@
 use crate::{
     model::{chat::ChatComponent, Difficulty, State, VarInt},
-    nbt::{Nbt, NbtJson},
+    nbt::{Nbt, NbtSerde},
     ser::*,
     PacketContext,
 };
@@ -34,7 +34,7 @@ pub struct LoginPlay {
     pub game_mode: GameMode,
     pub prev_game_mode: PreviousGameMode,
     pub dimension_names: Array<Identifier>,
-    pub registry_codec: NbtJson<HashMap<&'static str, Nbt>>,
+    pub registry_codec: NbtSerde<HashMap<String, Nbt>>,
     pub dimension_type: Identifier,
     pub dimension_name: Identifier,
     pub hashed_seed: i64,

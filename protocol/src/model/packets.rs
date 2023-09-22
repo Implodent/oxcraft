@@ -1,6 +1,7 @@
 use crate::error::Error;
 use ::bytes::{BufMut, Bytes, BytesMut};
 use aott::prelude::*;
+use miette::NamedSource;
 
 use crate::ser::*;
 
@@ -71,7 +72,15 @@ impl SerializedPacket {
     ) -> Result<P, crate::error::Error> {
         let context = PacketContext { id: self.id, state };
 
-        P::deserialize.parse_with_context(self.data.as_ref(), context)
+        P::deserialize
+            .parse_with_context(self.data.as_ref(), context)
+            .map_err(|e| match e {
+                Error::Ser(error) => Error::SerSrc(WithSource {
+                    source: NamedSource::new(format!("packet_{}", self.id), self.data.to_vec()),
+                    error,
+                }),
+                e => e,
+            })
     }
 }
 

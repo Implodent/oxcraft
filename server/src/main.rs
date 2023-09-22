@@ -1,4 +1,10 @@
-#![feature(try_blocks, associated_type_defaults, decl_macro, iterator_try_collect)]
+#![feature(
+    try_blocks,
+    associated_type_defaults,
+    decl_macro,
+    iterator_try_collect,
+    fmt_internals
+)]
 
 mod model;
 
@@ -6,6 +12,7 @@ use bevy::prelude::*;
 use model::{registry::Registry, DifficultySetting, DimensionType};
 use oxcr_protocol::{
     executor::{TaskContext, TokioTasksRuntime},
+    miette,
     model::{
         chat::{self, *},
         packets::{
@@ -22,10 +29,9 @@ use oxcr_protocol::{
         },
         Difficulty, State, VarInt, PROTOCOL_VERSION,
     },
-    nbt::{nbt_serde, NbtJson},
+    nbt::{nbt_serde, NbtSerde},
     rwlock_set,
     ser::{Array, Identifier, Json, Namespace},
-    serde::json,
     uuid::Uuid,
     AsyncSet, PlayerN, PlayerNet, ProtocolPlugin,
 };
@@ -93,13 +99,18 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
             let _ = w.world.entity_mut(ent_id).insert(player);
             let dimension_types = w.world.resource::<Registry<DimensionType>>();
             let worldgen_biomes = w.world.resource::<Registry<WorldgenBiome>>();
-            Ok(HashMap::from_iter([
-                ("minecraft:dimension_type", nbt_serde(dimension_types)?),
-                ("minecraft:worldgen/biome", nbt_serde(worldgen_biomes)?),
+            Ok::<_, oxcr_protocol::nbt::NbtError>(HashMap::from([
+                (
+                    "minecraft:dimension_type".to_string(),
+                    nbt_serde(dimension_types)?,
+                ),
+                (
+                    "minecraft:worldgen/biome".to_string(),
+                    nbt_serde(worldgen_biomes)?,
+                ),
             ]))
         })
-        .await
-        .map_err(|()| Error::Net(oxcr_protocol::error::Error::NbtFuckup))?;
+        .await?;
 
     debug!(?registry_codec);
 
@@ -107,7 +118,7 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
         entity_id: ent_id.index() as i32,
         game_mode,
         prev_game_mode: PreviousGameMode::Undefined,
-        registry_codec: NbtJson(registry_codec),
+        registry_codec: NbtSerde(registry_codec),
         enable_respawn_screen: true,
         is_hardcore: false,
         dimension_names: Array::new(&[Identifier::new(Namespace::Minecraft, "overworld")]),
@@ -264,6 +275,13 @@ fn on_login(rt: Res<TokioTasksRuntime>, mut ev: EventReader<PlayerLoginEvent>, q
             match lifecycle(player.clone(), cx.clone(), event.entity).await {
                 Ok(()) => Ok::<(), Error>(()),
                 Err(e) => {
+                    use miette::ReportHandler;
+                    let mut buf = String::new();
+                    miette::MietteHandlerOpts::new()
+                        .build()
+                        .debug(&e, &mut std::fmt::Formatter::new(&mut buf))
+                        .expect("why");
+                    error!("{buf}");
                     error!(error=?e, ?player, "Disconnecting");
 
                     // ignore the result because we term the connection afterwards
