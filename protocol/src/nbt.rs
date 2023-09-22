@@ -371,7 +371,7 @@ mod tests {
 
     fn test_nbt(value: Nbt, bytes: &[u8]) {
         let mut buf = BytesMut::new();
-        value.serialize_value(&mut buf);
+        value.serialize_value(&mut buf).unwrap();
         let buff = &buf[..];
         eprintln!("comparing {value:?}\n left = {buff:x?}\nright = {bytes:x?}",);
         assert_eq!(buff, bytes);
@@ -379,7 +379,7 @@ mod tests {
 
     fn test_nbt_named(name: &str, value: Nbt, bytes: &[u8]) {
         let mut buf = BytesMut::new();
-        NbtNamed::serialize_named(value.tag(), name, &value, &mut buf);
+        NbtNamed::serialize_named(value.tag(), name, &value, &mut buf).unwrap();
         let buff = &buf[..];
         eprintln!("comparing {name} {value:?}\n left = {buff:x?}\nright = {bytes:x?}",);
         assert_eq!(buff, bytes);
@@ -387,8 +387,8 @@ mod tests {
 
     fn test_nbt_json<T: serde::Serialize + std::fmt::Debug>(json: T, bytes: &[u8]) {
         eprintln!("testing {json:?}");
-        let nj = NbtSer(json);
-        let buf = nj.serialize();
+        let nj = NbtSerde(json);
+        let buf = nj.serialize().unwrap();
         let buff = &buf[..];
         eprintln!(" left = {buff:x?}\nright = {bytes:x?}");
         assert_eq!(buff, bytes);

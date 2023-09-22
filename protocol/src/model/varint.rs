@@ -92,7 +92,7 @@ mod tests {
             VarInt::<T>::deserialize.parse(bytes).unwrap(),
             VarInt(value)
         );
-        assert_eq!(VarInt(value).serialize(), bytes);
+        assert_eq!(VarInt(value).serialize().unwrap(), bytes);
     }
 
     #[test]
