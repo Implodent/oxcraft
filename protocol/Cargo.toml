@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 bevy.workspace = true
 tokio.workspace = true
-derive_more.workspace = true
+derive_more = "0.99.17"
 tracing.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
@@ -20,3 +20,4 @@ serde_derive = "1"
 uuid = { version = "1.4.1", features = ["v3"] }
 bitflags = "2.4.0"
 miette = { version = "5.10.0", features = ["fancy"] }
+indexmap = { version = "2.0.0", features = ["serde"] }

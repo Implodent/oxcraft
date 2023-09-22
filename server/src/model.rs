@@ -213,3 +213,11 @@ pub struct BiomeParticleOptions {
     #[serde(rename = "type")]
     pub particle_type: &'static str,
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(crate = "serde")]
+pub struct ChatType;
+
+impl RegistryItem for ChatType {
+    const REGISTRY: &'static str = "minecraft:chat_type";
+}

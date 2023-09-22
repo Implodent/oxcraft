@@ -1,6 +1,10 @@
 #![allow(dead_code)]
-use crate::nsfr::{i12, i26};
+use crate::{
+    nbt::Nbt,
+    nsfr::{i12, i26},
+};
 use derive_more::*;
+use indexmap::IndexMap;
 use miette::{NamedSource, SourceSpan};
 use std::{
     borrow::Cow,
@@ -28,13 +32,15 @@ pub trait Deserialize: Sized {
 }
 
 pub trait Serialize {
-    fn serialize(&self) -> ::bytes::Bytes {
-        let mut b = BytesMut::new();
-        self.serialize_to(&mut b);
-        b.freeze()
+    fn serialize(&self) -> Result<::bytes::Bytes, crate::error::Error> {
+        try {
+            let mut b = BytesMut::new();
+            self.serialize_to(&mut b)?;
+            b.freeze()
+        }
     }
     /// Serializes `self` to the given buffer.
-    fn serialize_to(&self, buf: &mut BytesMut);
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error>;
 }
 
 pub fn any_of<T: Debug>(v: &[T]) -> String {
@@ -230,10 +236,6 @@ pub fn with_context<
     }
 }
 
-pub fn seri<T: Serialize>(t: &T) -> ::bytes::Bytes {
-    t.serialize()
-}
-
 #[parser(extras = E)]
 pub fn slice_till_end<'a, I: SliceInput<'a>, E: ParserExtras<I>>(input: I) -> I::Slice {
     Ok(input.input.slice_from(input.offset..))
@@ -261,12 +263,14 @@ impl<const N: usize, Sy: Syncable> Deserialize for FixedStr<N, Sy> {
 }
 
 impl<const N: usize, Sy: Syncable> Serialize for FixedStr<N, Sy> {
-    fn serialize_to(&self, buf: &mut BytesMut) {
-        let n: i32 = self.len().try_into().unwrap();
-        let ln = VarInt(n);
-        buf.reserve(ln.length_of() + self.len());
-        ln.serialize_to(buf);
-        buf.put_slice(self.as_bytes())
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        try {
+            let n: i32 = self.len().try_into().unwrap();
+            let ln = VarInt(n);
+            buf.reserve(ln.length_of() + self.len());
+            ln.serialize_to(buf)?;
+            buf.put_slice(self.as_bytes())
+        }
     }
 }
 
@@ -348,9 +352,11 @@ impl Syncable for NoSync {
 }
 
 impl<'a> Serialize for &'a str {
-    fn serialize_to(&self, buf: &mut BytesMut) {
-        VarInt::<i32>(self.len().try_into().unwrap()).serialize_to(buf);
-        buf.put_slice(self.as_bytes());
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        try {
+            VarInt::<i32>(self.len().try_into().unwrap()).serialize_to(buf)?;
+            buf.put_slice(self.as_bytes());
+        }
     }
 }
 
@@ -368,9 +374,11 @@ impl<T: Debug + serde::Serialize> Debug for Json<T> {
 }
 
 impl<T: serde::Serialize> Serialize for Json<T> {
-    fn serialize_to(&self, buf: &mut BytesMut) {
-        let s = serde_json::to_string(&self.0).expect("json fail");
-        s.as_str().serialize_to(buf);
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        try {
+            let s = serde_json::to_string(&self.0).expect("json fail");
+            s.as_str().serialize_to(buf)?
+        }
     }
 }
 
@@ -404,20 +412,22 @@ impl<T: Deserialize> Deserialize for Option<T> {
 }
 
 impl<T: Serialize> Serialize for Option<T> {
-    fn serialize_to(&self, buf: &mut BytesMut) {
-        match self {
-            Some(val) => {
-                buf.put_u8(0x1);
-                val.serialize_to(buf)
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        try {
+            match self {
+                Some(val) => {
+                    buf.put_u8(0x1);
+                    val.serialize_to(buf)?
+                }
+                None => buf.put_u8(0x0),
             }
-            None => buf.put_u8(0x0),
         }
     }
 }
 
 impl Serialize for Uuid {
-    fn serialize_to(&self, buf: &mut BytesMut) {
-        buf.put_u128(self.as_u128())
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        try { buf.put_u128(self.as_u128()) }
     }
 }
 
@@ -452,10 +462,12 @@ impl<T: Clone, Sy: Syncable> Array<T, Sy> {
 }
 
 impl<T: Clone + Serialize, Sy: Syncable> Serialize for Array<T, Sy> {
-    fn serialize_to(&self, buf: &mut BytesMut) {
-        VarInt::<i32>(self.len().try_into().unwrap()).serialize_to(buf);
-        for item in self.iter() {
-            item.serialize_to(buf);
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        try {
+            VarInt::<i32>(self.len().try_into().unwrap()).serialize_to(buf)?;
+            for item in self.iter() {
+                item.serialize_to(buf)?;
+            }
         }
     }
 }
@@ -558,9 +570,11 @@ impl<Sy: Syncable> Identifier<Sy> {
 }
 
 impl<Sy: Syncable> Serialize for Identifier<Sy> {
-    fn serialize_to(&self, buf: &mut BytesMut) {
-        let formatted = format!("{}:{}", self.0, &*self.1);
-        formatted.as_str().serialize_to(buf)
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        try {
+            let formatted = format!("{}:{}", self.0, &*self.1);
+            formatted.as_str().serialize_to(buf)?
+        }
     }
 }
 impl<Sy: Syncable> Deserialize for Identifier<Sy> {
@@ -658,9 +672,9 @@ macro_rules! number_impl {
                     }
                 }
                 impl Serialize for $num {
-                    fn serialize_to(&self, buf: &mut BytesMut) {
+                    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> { try {
                         buf.put(&self.to_be_bytes()[..])
-                    }
+                    }}
                 }
             )*
         };
@@ -669,8 +683,10 @@ macro_rules! number_impl {
 number_impl![u8 u16 u32 u64 u128 i8 i16 i32 i64 i128 f32 f64];
 
 impl Serialize for bool {
-    fn serialize_to(&self, buf: &mut BytesMut) {
-        buf.put_u8(*self as u8);
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        try {
+            buf.put_u8(*self as u8);
+        }
     }
 }
 
@@ -691,11 +707,13 @@ pub struct Position {
 }
 
 impl Serialize for Position {
-    fn serialize_to(&self, buf: &mut BytesMut) {
-        let pos = (i64::from(self.x) & 0x3ffffff) << 38
-            | (i64::from(self.z) & 0x3ffffff) << 12
-            | (i64::from(self.y) & 0xfff);
-        buf.put_i64(pos);
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        try {
+            let pos = (i64::from(self.x) & 0x3ffffff) << 38
+                | (i64::from(self.z) & 0x3ffffff) << 12
+                | (i64::from(self.y) & 0xfff);
+            buf.put_i64(pos);
+        }
     }
 }
 
@@ -718,8 +736,10 @@ impl Deserialize for Position {
 
 pub macro serialize($ty:ty => [$($field:ident),*$(,)?]) {
     impl crate::ser::Serialize for $ty {
-        fn serialize_to(&self, buf: &mut ::bytes::BytesMut) {
-            $(self.$field.serialize_to(buf);)*
+        fn serialize_to(&self, buf: &mut ::bytes::BytesMut) -> Result<(), crate::error::Error> {
+            try {
+                $(self.$field.serialize_to(buf)?;)*
+            }
         }
     }
 }
@@ -757,8 +777,8 @@ pub macro impl_ser($(|$context:ty|)? $ty:ty => [$($(|$cx:ty|)?$field:ident),*$(,
 }
 
 impl Serialize for Bytes {
-    fn serialize_to(&self, buf: &mut BytesMut) {
-        buf.put_slice(&self)
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        try { buf.put_slice(&self) }
     }
 }
 
@@ -769,5 +789,19 @@ impl Deserialize for Bytes {
         Ok(Bytes::copy_from_slice(
             input.input.slice_from(input.offset..),
         ))
+    }
+}
+
+impl Serialize for IndexMap<String, Nbt> {
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        Nbt::serialize_compound(self, buf)
+    }
+}
+
+impl Deserialize for IndexMap<String, Nbt> {
+    fn deserialize<'a>(
+        input: &mut Input<&'a [u8], Extra<Self::Context>>,
+    ) -> PResult<&'a [u8], Self, Extra<Self::Context>> {
+        Nbt::compound(input)
     }
 }

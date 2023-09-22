@@ -26,6 +26,7 @@ pub mod serde {
     pub use ::serde::*;
     pub use ::serde_json as json;
 }
+pub use indexmap;
 pub use miette;
 
 pub async fn rwlock_set<T: 'static>(rwlock: &RwLock<T>, value: T) {
@@ -143,7 +144,7 @@ impl PlayerNet {
             let Err::<!, _>(e) = async {
                 loop {
                     let packet: SerializedPacket = r_send.recv_async().await?;
-                    let data = packet.serialize();
+                    let data = packet.serialize()?;
                     write.write_all(&data).await?;
                 }
             }
@@ -226,7 +227,7 @@ impl PlayerNet {
             debug!(?packet, addr=%self.peer_addr, "sending packet failed - disconnected");
             return Err(crate::error::Error::ConnectionEnded);
         }
-        let spack = SerializedPacket::new_ref(&packet);
+        let spack = SerializedPacket::new_ref(&packet)?;
         debug!(?packet, addr=%self.peer_addr, ?spack, "Sending packet");
         Ok(self.send.send(spack)?)
     }
@@ -237,7 +238,7 @@ impl PlayerNet {
         debug!(?channel, ?data, %self.peer_addr, "Sending plugin message");
         self.send_packet(PluginMessage {
             channel,
-            data: data.serialize(),
+            data: data.serialize()?,
         })
     }
 

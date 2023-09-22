@@ -55,15 +55,17 @@ pub struct SerializedPacket {
 }
 
 impl SerializedPacket {
-    pub fn new<P: Packet + Serialize>(packet: P) -> Self {
+    pub fn new<P: Packet + Serialize>(packet: P) -> Result<Self, crate::error::Error> {
         Self::new_ref(&packet)
     }
 
-    pub fn new_ref<P: Packet + Serialize>(packet: &P) -> Self {
-        let data = packet.serialize();
-        let id = P::ID;
-        let length = id.length_of() + data.len();
-        Self { length, id, data }
+    pub fn new_ref<P: Packet + Serialize>(packet: &P) -> Result<Self, crate::error::Error> {
+        try {
+            let data = packet.serialize()?;
+            let id = P::ID;
+            let length = id.length_of() + data.len();
+            Self { length, id, data }
+        }
     }
 
     pub fn try_deserialize<P: Packet + Deserialize<Context = PacketContext>>(

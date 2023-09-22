@@ -12,6 +12,7 @@ use bevy::prelude::*;
 use model::{registry::Registry, DifficultySetting, DimensionType};
 use oxcr_protocol::{
     executor::{TaskContext, TokioTasksRuntime},
+    indexmap::IndexMap,
     miette,
     model::{
         chat::{self, *},
@@ -29,7 +30,7 @@ use oxcr_protocol::{
         },
         Difficulty, State, VarInt, PROTOCOL_VERSION,
     },
-    nbt::{nbt_serde, NbtSerde},
+    nbt::{nbt_serde, Nbt, NbtSerde},
     rwlock_set,
     ser::{Array, Identifier, Json, Namespace},
     uuid::Uuid,
@@ -42,7 +43,9 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{
     error::Error,
-    model::{Player, PlayerBundle, PlayerGameMode, PlayerName, PlayerUuid, WorldgenBiome},
+    model::{
+        ChatType, Player, PlayerBundle, PlayerGameMode, PlayerName, PlayerUuid, WorldgenBiome,
+    },
 };
 
 mod error;
@@ -99,7 +102,7 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
             let _ = w.world.entity_mut(ent_id).insert(player);
             let dimension_types = w.world.resource::<Registry<DimensionType>>();
             let worldgen_biomes = w.world.resource::<Registry<WorldgenBiome>>();
-            Ok::<_, oxcr_protocol::nbt::NbtError>(HashMap::from([
+            Ok::<_, oxcr_protocol::nbt::NbtError>(IndexMap::from([
                 (
                     "minecraft:dimension_type".to_string(),
                     nbt_serde(dimension_types)?,
@@ -107,6 +110,22 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
                 (
                     "minecraft:worldgen/biome".to_string(),
                     nbt_serde(worldgen_biomes)?,
+                ),
+                (
+                    "minecraft:chat_type".to_string(),
+                    Nbt::Compound(IndexMap::from([
+                        (
+                            "type".to_string(),
+                            Nbt::String("minecraft:chat_type".to_string()),
+                        ),
+                        (
+                            "value".to_string(),
+                            Nbt::ListTyped(NbtList {
+                                tag: NbtTagType::Compound,
+                                tags: vec![],
+                            }),
+                        ),
+                    ])),
                 ),
             ]))
         })
@@ -118,7 +137,7 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
         entity_id: ent_id.index() as i32,
         game_mode,
         prev_game_mode: PreviousGameMode::Undefined,
-        registry_codec: NbtSerde(registry_codec),
+        registry_codec,
         enable_respawn_screen: true,
         is_hardcore: false,
         dimension_names: Array::new(&[Identifier::new(Namespace::Minecraft, "overworld")]),

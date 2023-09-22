@@ -1,13 +1,14 @@
 use crate::{
     model::{chat::ChatComponent, Difficulty, State, VarInt},
-    nbt::{Nbt, NbtSerde},
+    nbt::Nbt,
     ser::*,
     PacketContext,
 };
-use std::{collections::HashMap, ptr};
+use std::ptr;
 
 use aott::primitive::one_of;
 use bytes::BufMut;
+use indexmap::IndexMap;
 
 use super::Packet;
 
@@ -34,7 +35,7 @@ pub struct LoginPlay {
     pub game_mode: GameMode,
     pub prev_game_mode: PreviousGameMode,
     pub dimension_names: Array<Identifier>,
-    pub registry_codec: NbtSerde<HashMap<String, Nbt>>,
+    pub registry_codec: IndexMap<String, Nbt>,
     pub dimension_type: Identifier,
     pub dimension_name: Identifier,
     pub hashed_seed: i64,
@@ -165,7 +166,7 @@ bitflags::bitflags! {
 }
 
 impl Serialize for Abilities {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) {
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
         self.bits().serialize_to(buf)
     }
 }
