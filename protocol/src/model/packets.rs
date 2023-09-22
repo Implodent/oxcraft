@@ -5,8 +5,6 @@ use miette::NamedSource;
 
 use crate::ser::*;
 
-use self::handshake::Handshake;
-
 use super::{State, VarInt};
 
 pub mod handshake;
@@ -17,24 +15,28 @@ pub mod status;
 #[derive(Debug, Clone)]
 pub enum PacketClientbound {}
 
-#[derive(Debug, Clone)]
-pub enum PacketServerbound {
-    Handshake(handshake::Handshake),
-}
+macro define_packet_serverbound($($name:ident => $packet:path),*) {
+    #[derive(Debug, Clone)]
+    pub enum PacketServerbound {
+        $($name($packet),)*
+    }
 
-impl Deserialize for PacketServerbound {
-    type Context = PacketContext;
+    impl Deserialize for PacketServerbound {
+        type Context = PacketContext;
 
-    #[parser(extras = "Extra<Self::Context>")]
-    fn deserialize(input: &[u8]) -> Self {
-        match input.context().id {
-            id if id == Handshake::ID => Handshake::deserialize
-                .map(Self::Handshake)
-                .parse_with(input),
-            VarInt(id) => Err(Error::InvalidPacketId(id)),
+        #[parser(extras = "Extra<Self::Context>")]
+        fn deserialize(input: &[u8]) -> Self {
+            match input.context().id {
+                $(id if id == <$packet>::ID => <$packet>::deserialize
+                    .map(Self::$name)
+                  .parse_with(input),)*
+                VarInt(id) => Err(Error::InvalidPacketId(id)),
+            }
         }
     }
 }
+
+define_packet_serverbound![Handshake => handshake::Handshake];
 
 #[derive(Debug)]
 pub struct PacketContext {
@@ -59,7 +61,7 @@ impl SerializedPacket {
         Self::new_ref(&packet)
     }
 
-    pub fn new_ref<P: Packet + Serialize>(packet: &P) -> Result<Self, Error> {
+    pub fn new_ref<P: Packet + Serialize + ?Sized>(packet: &P) -> Result<Self, Error> {
         try {
             let data = packet.serialize()?;
             let id = P::ID;
@@ -106,10 +108,7 @@ impl Deserialize for SerializedPacket {
 
 impl Serialize for SerializedPacket {
     fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), Error> {
-        let length = VarInt::<i32>(
-            self.length
-                .try_into().map_err(|_| Error::VarIntTooBig)?
-        );
+        let length = VarInt::<i32>(self.length.try_into().map_err(|_| Error::VarIntTooBig)?);
         buf.reserve(length.length_of() + self.id.length_of() + self.data.len());
         length.serialize_to(buf)?;
         self.id.serialize_to(buf)?;

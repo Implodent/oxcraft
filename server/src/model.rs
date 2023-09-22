@@ -44,7 +44,7 @@ pub struct DimensionType {
     pub piglin_safe: bool,
     pub has_raids: bool,
     pub monster_spawn_light_level: MonsterSpawnLightLevel,
-    pub monster_spawn_block_light_limit: u8,
+    pub monster_spawn_block_light_limit: i32,
     pub natural: bool,
     pub ambient_light: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,31 +57,31 @@ pub struct DimensionType {
     pub min_y: i32,
     pub height: i32,
     pub logical_height: i32,
-    pub coodrinate_scale: f64,
+    pub coordinate_scale: f64,
     pub ultrawarm: bool,
     pub has_ceiling: bool,
 }
 
 impl DimensionType {
     pub const OVERWORLD: Self = Self {
-        piglin_safe: true,
-        has_raids: true,
-        monster_spawn_light_level: MonsterSpawnLightLevel::Range(0..=6),
-        monster_spawn_block_light_limit: 0,
-        natural: true,
-        ambient_light: 0f32,
-        fixed_time: None,
-        infiniburn: "#minecraft:infiniburn_overworld",
-        respawn_anchor_works: false,
-        has_skylight: true,
+        ambient_light: 0.0,
         bed_works: true,
+        coordinate_scale: 1.0,
         effects: "minecraft:overworld",
-        min_y: -64,
-        height: 384,
-        logical_height: 384,
-        coodrinate_scale: 1f64,
-        ultrawarm: false,
         has_ceiling: false,
+        has_raids: true,
+        has_skylight: true,
+        height: 384,
+        infiniburn: "#minecraft:infiniburn_overworld",
+        logical_height: 384,
+        min_y: -64,
+        monster_spawn_block_light_limit: 0,
+        monster_spawn_light_level: MonsterSpawnLightLevel::Range(0..=7),
+        natural: true,
+        piglin_safe: false,
+        respawn_anchor_works: false,
+        ultrawarm: false,
+        fixed_time: None,
     };
 }
 
@@ -89,12 +89,48 @@ impl RegistryItem for DimensionType {
     const REGISTRY: &'static str = "minecraft:dimension_type";
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(crate = "serde")]
+#[derive(Debug, Clone)]
 pub enum MonsterSpawnLightLevel {
     #[allow(dead_code)]
     Level(i32),
     Range(RangeInclusive<i32>),
+}
+
+impl serde::Serialize for MonsterSpawnLightLevel {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Level(level) => serializer.serialize_i32(*level),
+            Self::Range(range) => {
+                #[derive(serde::Serialize)]
+                #[serde(crate = "serde")]
+                struct MSLLRange {
+                    #[serde(rename = "type")]
+                    ty: &'static str,
+                    value: MSLLRangeRange,
+                }
+
+                #[derive(serde::Serialize)]
+                #[serde(crate = "serde")]
+                struct MSLLRangeRange {
+                    max_inclusive: i32,
+                    min_inclusive: i32,
+                }
+
+                let r = MSLLRange {
+                    ty: "minecraft:uniform",
+                    value: MSLLRangeRange {
+                        max_inclusive: *range.end(),
+                        min_inclusive: *range.start(),
+                    },
+                };
+
+                serde::Serialize::serialize(&r, serializer)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

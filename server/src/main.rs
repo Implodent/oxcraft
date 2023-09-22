@@ -21,7 +21,7 @@ use oxcr_protocol::{
             login::{DisconnectLogin, LoginStart, LoginSuccess},
             play::{
                 Abilities, ChangeDifficulty, DisconnectPlay, GameMode, LoginPlay, PlayerAbilities,
-                PreviousGameMode,
+                PreviousGameMode, SetDefaultSpawnPosition,
             },
             status::{
                 self, PingRequest, Players, PongResponse, Sample, StatusRequest, StatusResponse,
@@ -32,7 +32,7 @@ use oxcr_protocol::{
     },
     nbt::{nbt_serde, Nbt, NbtList, NbtTagType},
     rwlock_set,
-    ser::{Array, Identifier, Json, Namespace},
+    ser::{Array, Identifier, Json, Namespace, Position},
     uuid::Uuid,
     AsyncSet, PlayerN, PlayerNet, ProtocolPlugin,
 };
@@ -43,9 +43,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{
     error::Error,
-    model::{
-        Player, PlayerBundle, PlayerGameMode, PlayerName, PlayerUuid, WorldgenBiome,
-    },
+    model::{Player, PlayerBundle, PlayerGameMode, PlayerName, PlayerUuid, WorldgenBiome},
 };
 
 mod error;
@@ -131,7 +129,7 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
         })
         .await?;
 
-    debug!(?registry_codec);
+    debug!("{registry_codec:#?}");
 
     net.send_packet(LoginPlay {
         entity_id: ent_id.index() as i32,
@@ -143,15 +141,15 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
         dimension_names: Array::new(&[Identifier::new(Namespace::Minecraft, "overworld")]),
         dimension_name: Identifier::new(Namespace::Minecraft, "overworld"),
         dimension_type: Identifier::new(Namespace::Minecraft, "overworld"),
-        hashed_seed: 0xfaf019,
+        hashed_seed: 0,
         death_location: None,
         is_debug: false,
         is_flat: false,
-        max_players: VarInt(0x1000),
+        max_players: VarInt(1),
         reduced_debug_info: false,
-        portal_cooldown: VarInt(0),
-        simulation_distance: VarInt(8),
-        view_distance: VarInt(8),
+        portal_cooldown: VarInt(20),
+        simulation_distance: VarInt(2),
+        view_distance: VarInt(2),
     })?;
 
     let difficulty = cx
@@ -169,6 +167,15 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
         flags: Abilities::FLYING,
         flying_speed: 0.05f32,
         fov_modifier: 0.1f32,
+    })?;
+
+    net.send_packet(SetDefaultSpawnPosition {
+        location: Position {
+            x: 0i16.into(),
+            z: 0i16.into(),
+            y: 50i8.into(),
+        },
+        angle: 0f32,
     })?;
 
     Ok(())

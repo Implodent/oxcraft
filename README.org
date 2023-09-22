@@ -9,8 +9,7 @@ I chose AOTT for serialization, becuase serde is too much for me and implementin
 
 ** Sources
 
-- [[https://wiki.vg/Protocol][Where I get protocol documentation]]
-
+- [[https://wiki.vg/index.php?title=Protocol&oldid=18375][Where I get protocol documentation]] (1.20.1)
 ** Hacking / building & running from source
 First - clone the repo (~gh repo clone Implodent/oxcraft~ or if you don't have Github's CLI (the ~gh~), ~git clone https://github.com/Implodent/oxcraft.git~) or ~git pull~ (to update the tree)
 

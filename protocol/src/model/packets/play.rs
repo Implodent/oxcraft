@@ -184,3 +184,15 @@ impl Packet for PlayerAbilities {
     const ID: crate::model::VarInt = VarInt(0x34);
     const STATE: crate::model::State = State::Play;
 }
+
+#[derive(Debug, Clone)]
+pub struct SetDefaultSpawnPosition {
+    pub location: Position,
+    pub angle: f32,
+}
+
+impl_ser!(|PacketContext| SetDefaultSpawnPosition => [location, angle]);
+impl Packet for SetDefaultSpawnPosition {
+    const ID: crate::model::VarInt = VarInt(0x50);
+    const STATE: crate::model::State = State::Play;
+}
