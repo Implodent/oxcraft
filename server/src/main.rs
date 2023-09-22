@@ -29,20 +29,20 @@ use oxcr_protocol::{
         },
         Difficulty, State, VarInt, PROTOCOL_VERSION,
     },
-    nbt::{nbt_serde, NbtSerde},
+    nbt::nbt_serde,
     rwlock_set,
     ser::{Array, Identifier, Json, Namespace},
     uuid::Uuid,
     AsyncSet, PlayerN, PlayerNet, ProtocolPlugin,
 };
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, sync::mpsc};
 use tracing::instrument;
 use tracing_subscriber::EnvFilter;
 
 use crate::{
     error::Error,
-    model::{Player, PlayerBundle, PlayerGameMode, PlayerName, PlayerUuid, WorldgenBiome},
+    model::{Player, PlayerBundle, PlayerGameMode, PlayerName, PlayerUuid, WorldgenBiome, RegistryCodec},
 };
 
 mod error;
@@ -99,16 +99,10 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
             let _ = w.world.entity_mut(ent_id).insert(player);
             let dimension_types = w.world.resource::<Registry<DimensionType>>();
             let worldgen_biomes = w.world.resource::<Registry<WorldgenBiome>>();
-            Ok::<_, oxcr_protocol::nbt::NbtError>(HashMap::from([
-                (
-                    "minecraft:dimension_type".to_string(),
-                    nbt_serde(dimension_types)?,
-                ),
-                (
-                    "minecraft:worldgen/biome".to_string(),
-                    nbt_serde(worldgen_biomes)?,
-                ),
-            ]))
+            nbt_serde(&RegistryCodec {
+                dimension_type: dimension_types,
+                worldgen_biome: worldgen_biomes,
+            })
         })
         .await?;
 
@@ -118,7 +112,7 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
         entity_id: ent_id.index() as i32,
         game_mode,
         prev_game_mode: PreviousGameMode::Undefined,
-        registry_codec: NbtSerde(registry_codec),
+        registry_codec: registry_codec,
         enable_respawn_screen: true,
         is_hardcore: false,
         dimension_names: Array::new(&[Identifier::new(Namespace::Minecraft, "overworld")]),

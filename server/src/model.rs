@@ -8,7 +8,7 @@ use oxcr_protocol::{
     uuid::Uuid,
 };
 
-use self::registry::RegistryItem;
+use self::registry::{RegistryItem, Registry};
 
 pub mod registry;
 
@@ -212,4 +212,12 @@ pub struct BiomeParticles {
 pub struct BiomeParticleOptions {
     #[serde(rename = "type")]
     pub particle_type: &'static str,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(crate = "serde")]
+pub struct RegistryCodec<'a> {
+    #[serde(rename = "minecraft:dimension_type")] pub dimension_type: &'a Registry<DimensionType>,
+    #[serde(rename = "minecraft:worldgen/biome")] pub worldgen_biome: &'a Registry<WorldgenBiome>,
+    // #[serde(rename = "minecraft:chat_type")] chat_type: ChatType, TODO
 }

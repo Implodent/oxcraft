@@ -154,6 +154,21 @@ impl Serialize for [Nbt] {
     }
 }
 
+impl Serialize for Nbt {
+    fn serialize_to(&self, buf: &mut BytesMut) {
+        self.serialize_value(buf);
+    }
+}
+
+impl<'de> Deserialize for Nbt {
+    fn deserialize<'a>(
+        input: &mut aott::prelude::Input<&'a [u8], Extra<Self::Context>>,
+    ) -> aott::PResult<&'a [u8], Self, Extra<Self::Context>> {
+        let tag = with_context(Nbt::single, NbtTagType::Compound)(input)?;
+        todo!()
+    }
+}
+
 struct NbtList {
     pub tag: NbtTagType,
     pub length: usize,
