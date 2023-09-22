@@ -1378,8 +1378,30 @@ impl SerializeTupleVariant for NbtSerSeq {
     }
 }
 
+/// Serializes a `T` into NBT using its' [`Serialize`](serde::Serialize) implementation. (T -> Nbt)
+///
+/// # See also
+/// [`nbt_deserde`] and [`nbt_deserde_owned`] if you want to convert the other way (Nbt -> T)
 pub fn nbt_serde<T: serde::Serialize>(value: &T) -> Result<Nbt, NbtError> {
     value.serialize(NbtSer)
+}
+
+/// Deserializes a `T` from an NBT object with lifetime `'de`.
+///
+/// # See also
+/// [`nbt_deserde_owned`] if you want to deserialize from an owned NBT.
+pub fn nbt_deserde<'de, T: serde::Deserialize<'de>>(nbt: &'de Nbt) -> Result<T, NbtError> {
+    T::deserialize(NbtDe { input: nbt })
+}
+
+/// Deserializes a `T` from an owned NBT object.
+/// `T` should implement [`DeserializeOwned`](serde::de::DeserializeOwned)
+/// (meaning it could deserialize from an NBT object with **any** lifetime, not **some** specific lifetime).
+///
+/// # See also
+/// [`nbt_deserde`] if you want to deserialize from an NBT with a specific lifetime.
+pub fn nbt_deserde_owned<T: for<'de> serde::Deserialize<'de>>(nbt: Nbt) -> Result<T, NbtError> {
+    T::deserialize(NbtDe { input: &nbt })
 }
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
