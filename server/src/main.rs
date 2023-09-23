@@ -31,6 +31,7 @@ use oxcr_protocol::{
         Difficulty, State, VarInt, PROTOCOL_VERSION,
     },
     nbt::{nbt_serde, Nbt, NbtList, NbtTagType},
+    nsfr::when_the_miette,
     rwlock_set,
     ser::{Array, Identifier, Json, Namespace, Position},
     uuid::Uuid,
@@ -298,16 +299,9 @@ fn on_login(rt: Res<TokioTasksRuntime>, mut ev: EventReader<PlayerLoginEvent>, q
         let shit = event.shit.to_owned();
         rt.spawn_background_task(move |task| async move {
             let cx = Arc::new(task);
-            match lifecycle(player.clone(), cx.clone(), event.entity).await {
+            match when_the_miette(lifecycle(player.clone(), cx.clone(), event.entity).await) {
                 Ok(()) => Ok::<(), Error>(()),
                 Err(e) => {
-                    use miette::ReportHandler;
-                    let mut buf = String::new();
-                    miette::MietteHandlerOpts::new()
-                        .build()
-                        .debug(&e, &mut std::fmt::Formatter::new(&mut buf))
-                        .expect("why");
-                    error!("{buf}");
                     error!(error=?e, ?player, "Disconnecting");
 
                     // ignore the result because we term the connection afterwards
@@ -360,6 +354,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .pretty()
         .with_env_filter(EnvFilter::from_env("OXCR_LOG"))
         .init();
+    miette::set_panic_hook();
     let tcp = tokio::net::TcpListener::bind(("127.0.0.1", 25565)).await?;
     App::new()
         .add_plugins(ProtocolPlugin)
