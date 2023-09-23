@@ -14,7 +14,7 @@ pub fn when_the_miette<T, E: Diagnostic>(result: Result<T, E>) -> Result<T, E> {
                 .debug(&e, &mut std::fmt::Formatter::new(&mut buf))
                 .expect("miette failed... sadge");
 
-            tracing::error!("{buf}");
+            eprintln!("{buf}");
             Err(e)
         }
     }
