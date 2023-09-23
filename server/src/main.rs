@@ -1,10 +1,4 @@
-#![feature(
-    try_blocks,
-    associated_type_defaults,
-    decl_macro,
-    iterator_try_collect,
-    fmt_internals
-)]
+#![feature(try_blocks, associated_type_defaults, decl_macro, iterator_try_collect)]
 
 mod model;
 
@@ -28,10 +22,8 @@ use oxcr_protocol::{
                 StatusResponseJson,
             },
         },
-        Difficulty, State, VarInt, PROTOCOL_VERSION,
         registry::Registry,
-        DimensionType,
-        WorldgenBiome
+        Difficulty, DimensionType, State, VarInt, WorldgenBiome, PROTOCOL_VERSION,
     },
     nbt::{nbt_serde, Nbt, NbtList, NbtTagType},
     nsfr::when_the_miette,

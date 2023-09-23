@@ -9,7 +9,8 @@
     const_maybe_uninit_array_assume_init,
     async_fn_in_trait,
     exhaustive_patterns,
-    never_type
+    never_type,
+    fmt_internals
 )]
 
 pub mod error;
