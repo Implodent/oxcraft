@@ -1,5 +1,5 @@
 use bevy::prelude::Resource;
-use oxcr_protocol::serde;
+use crate::serde;
 use std::collections::HashMap;
 
 use serde::{ser::SerializeStruct, Serialize};
@@ -18,7 +18,6 @@ pub trait RegistryItem {
 }
 
 #[derive(Serialize, Clone)]
-#[serde(crate = "oxcr_protocol::serde")]
 struct Yeet<T> {
     name: String,
     id: i32,

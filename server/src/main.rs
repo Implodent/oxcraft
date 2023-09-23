@@ -9,7 +9,7 @@
 mod model;
 
 use bevy::prelude::*;
-use model::{registry::Registry, DifficultySetting, DimensionType};
+use model::DifficultySetting;
 use oxcr_protocol::{
     executor::{TaskContext, TokioTasksRuntime},
     indexmap::IndexMap,
@@ -29,6 +29,9 @@ use oxcr_protocol::{
             },
         },
         Difficulty, State, VarInt, PROTOCOL_VERSION,
+        registry::Registry,
+        DimensionType,
+        WorldgenBiome
     },
     nbt::{nbt_serde, Nbt, NbtList, NbtTagType},
     rwlock_set,
@@ -43,7 +46,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{
     error::Error,
-    model::{Player, PlayerBundle, PlayerGameMode, PlayerName, PlayerUuid, WorldgenBiome},
+    model::{Player, PlayerBundle, PlayerGameMode, PlayerName, PlayerUuid},
 };
 
 mod error;
