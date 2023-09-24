@@ -98,7 +98,7 @@ pub struct Property {
 }
 
 impl Serialize for Property {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error>{
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
         self.name.serialize_to(buf)?;
         self.value.serialize_to(buf)?;
         self.signature.serialize_to(buf)?;

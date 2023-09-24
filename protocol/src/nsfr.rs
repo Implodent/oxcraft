@@ -8,7 +8,9 @@ pub fn when_the_miette<T, E: Diagnostic>(result: Result<T, E>) -> Result<T, E> {
         Ok(_) => result,
         Err(e) => {
             use miette::ReportHandler;
+
             let mut buf = String::new();
+
             miette::MietteHandlerOpts::new()
                 .build()
                 .debug(&e, &mut std::fmt::Formatter::new(&mut buf))

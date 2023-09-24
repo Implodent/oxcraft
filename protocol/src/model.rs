@@ -1,11 +1,11 @@
 pub mod chat;
 pub mod packets;
-mod varint;
 pub mod registry;
+mod varint;
 use self::registry::RegistryItem;
 use aott::primitive::one_of;
 use bytes::BufMut;
-use std::{ptr, ops::RangeInclusive};
+use std::{ops::RangeInclusive, ptr};
 pub use varint::*;
 
 use crate::ser::{Deserialize, Serialize};

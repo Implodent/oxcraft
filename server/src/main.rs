@@ -21,6 +21,7 @@ use oxcr_protocol::{
                 self, PingRequest, Players, PongResponse, Sample, StatusRequest, StatusResponse,
                 StatusResponseJson,
             },
+            SerializedPacket,
         },
         registry::Registry,
         Difficulty, DimensionType, State, VarInt, WorldgenBiome, PROTOCOL_VERSION,
@@ -127,7 +128,7 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
 
     debug!("{registry_codec:#?}");
 
-    net.send_packet(LoginPlay {
+    let login_play = LoginPlay {
         entity_id: ent_id.index() as i32,
         game_mode,
         prev_game_mode: PreviousGameMode::Undefined,
@@ -143,10 +144,12 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
         is_flat: false,
         max_players: VarInt(1),
         reduced_debug_info: false,
-        portal_cooldown: VarInt(20),
         simulation_distance: VarInt(2),
         view_distance: VarInt(2),
-    })?;
+        portal_cooldown: VarInt(20),
+    };
+
+    net.send_packet(login_play)?;
 
     let difficulty = cx
         .run_on_main_thread(move |w| *w.world.resource::<DifficultySetting>())
@@ -349,8 +352,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .pretty()
         .with_env_filter(EnvFilter::from_env("OXCR_LOG"))
         .init();
+
     miette::set_panic_hook();
+
     let tcp = tokio::net::TcpListener::bind(("127.0.0.1", 25565)).await?;
+
     App::new()
         .add_plugins(ProtocolPlugin)
         .add_event::<PlayerLoginEvent>()
@@ -364,5 +370,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_systems(Startup, (init_registries, listen))
         .add_systems(Update, on_login)
         .run();
+
     Ok(())
 }

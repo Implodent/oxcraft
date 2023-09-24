@@ -5,9 +5,10 @@ use crate::{
 };
 use derive_more::*;
 use indexmap::IndexMap;
-use miette::{NamedSource, SourceSpan};
+use miette::SourceSpan;
 use std::{
     borrow::Cow,
+    collections::VecDeque,
     fmt::{Debug, Display},
     marker::PhantomData,
     ops::{Deref, Range},
@@ -81,14 +82,142 @@ pub struct SerializationError<Item: Debug + 'static> {
 }
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
-#[error("{error}")]
+#[error("{kind}")]
 pub struct WithSource<Item: Debug + 'static> {
     #[source_code]
-    pub source: NamedSource,
+    pub source: BytesSource,
+    #[label = "here"]
+    pub span: SourceSpan,
     #[diagnostic(transparent)]
     #[source]
     #[diagnostic_source]
-    pub error: SerializationError<Item>,
+    pub kind: SerializationErrorKind<Item>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BytesSource(Bytes, Option<String>);
+
+fn context_info<'a>(
+    input: &'a [u8],
+    span: &SourceSpan,
+    context_lines_before: usize,
+    context_lines_after: usize,
+    name: Option<String>,
+) -> Result<miette::MietteSpanContents<'a>, miette::MietteError> {
+    let mut offset = 0usize;
+    let mut line_count = 0usize;
+    let mut start_line = 0usize;
+    let mut start_column = 0usize;
+    let mut before_lines_starts = VecDeque::new();
+    let mut current_line_start = 0usize;
+    let mut end_lines = 0usize;
+    let mut post_span = false;
+    let mut post_span_got_newline = false;
+    let mut iter = input.iter().copied().peekable();
+    while let Some(char) = iter.next() {
+        if matches!(char, b'\r' | b'\n') {
+            line_count += 1;
+            if char == b'\r' && iter.next_if_eq(&b'\n').is_some() {
+                offset += 1;
+            }
+            if offset < span.offset() {
+                // We're before the start of the span.
+                start_column = 0;
+                before_lines_starts.push_back(current_line_start);
+                if before_lines_starts.len() > context_lines_before {
+                    start_line += 1;
+                    before_lines_starts.pop_front();
+                }
+            } else if offset >= span.offset() + span.len().saturating_sub(1) {
+                // We're after the end of the span, but haven't necessarily
+                // started collecting end lines yet (we might still be
+                // collecting context lines).
+                if post_span {
+                    start_column = 0;
+                    if post_span_got_newline {
+                        end_lines += 1;
+                    } else {
+                        post_span_got_newline = true;
+                    }
+                    if end_lines >= context_lines_after {
+                        offset += 1;
+                        break;
+                    }
+                }
+            }
+            current_line_start = offset + 1;
+        } else if offset < span.offset() {
+            start_column += 1;
+        }
+
+        if offset >= (span.offset() + span.len()).saturating_sub(1) {
+            post_span = true;
+            if end_lines >= context_lines_after {
+                offset += 1;
+                break;
+            }
+        }
+
+        offset += 1;
+    }
+
+    if offset >= (span.offset() + span.len()).saturating_sub(1) {
+        let starting_offset = before_lines_starts.front().copied().unwrap_or_else(|| {
+            if context_lines_before == 0 {
+                span.offset()
+            } else {
+                0
+            }
+        });
+        Ok(if let Some(name) = name {
+            miette::MietteSpanContents::new_named(
+                name,
+                &input[starting_offset..offset],
+                (starting_offset, offset - starting_offset).into(),
+                start_line,
+                if context_lines_before == 0 {
+                    start_column
+                } else {
+                    0
+                },
+                line_count,
+            )
+        } else {
+            miette::MietteSpanContents::new(
+                &input[starting_offset..offset],
+                (starting_offset, offset - starting_offset).into(),
+                start_line,
+                if context_lines_before == 0 {
+                    start_column
+                } else {
+                    0
+                },
+                line_count,
+            )
+        })
+    } else {
+        Err(miette::MietteError::OutOfBounds)
+    }
+}
+
+impl miette::SourceCode for BytesSource {
+    fn read_span<'a>(
+        &'a self,
+        span: &SourceSpan,
+        _context_lines_before: usize,
+        _context_lines_after: usize,
+    ) -> Result<Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
+        let con = context_info(&self.0, span, 0, 0, self.1.as_ref().cloned())?;
+
+        Ok(Box::new(con))
+    }
+}
+
+impl BytesSource {
+    pub fn new(bytes: Bytes, name: Option<String>) -> Self {
+        let debag = format!("{bytes:?}");
+        Self(Bytes::copy_from_slice(debag.as_bytes()), name)
+    }
 }
 
 pub struct Extra<C>(PhantomData<C>);
@@ -129,7 +258,7 @@ impl<'a> Error<&'a [u8]> for crate::error::Error {
         expected: Option<Vec<<&'a [u8] as InputType>::Token>>,
     ) -> Self {
         Self::Ser(SerializationError {
-            span: span.into(),
+            span: ((span.start.saturating_sub(1))..span.end).into(),
             kind: SerializationErrorKind::UnexpectedEof { expected },
         })
     }
@@ -173,7 +302,7 @@ impl<'a> Error<&'a str> for crate::error::Error {
         expected: Option<Vec<<&'a str as InputType>::Token>>,
     ) -> Self {
         Self::SerStr(SerializationError {
-            span: span.into(),
+            span: ((span.start.saturating_sub(1))..span.end).into(),
             kind: SerializationErrorKind::UnexpectedEof { expected },
         })
     }
@@ -434,17 +563,7 @@ impl Serialize for Uuid {
 impl Deserialize for Uuid {
     #[parser(extras = "Extra<Self::Context>")]
     fn deserialize(input: &[u8]) -> Self {
-        const AMOUNT: usize = 16;
-
-        if input.input.len() < input.offset + AMOUNT {
-            let e = Error::<&'a [u8]>::unexpected_eof(input.span_since(input.offset), None);
-            return Err(e);
-        }
-
-        let bytes = input.input.slice(input.offset..input.offset + AMOUNT);
-        input.offset += AMOUNT;
-
-        Ok(Self::from_slice(bytes).unwrap())
+        Ok(Self::from_bytes(take_exact().parse_with(input)?))
     }
 }
 

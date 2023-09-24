@@ -78,6 +78,7 @@ impl Nbt {
 
     fn tag(&self) -> NbtTagType {
         use NbtTagType as T;
+
         match &self {
             Self::Byte(_) => T::Byte,
             Self::ByteArray(_) => T::ByteArray,
@@ -227,7 +228,7 @@ impl NbtTag {
         Ok(Self::Named(NbtNamed {
             tag,
             name,
-            // SAFETY: end tag type was handled beforehand, so we can safely explode here
+            // SAFETY: end tag type was handled beforehand, so we can safely unwrap_unchecked here
             value: unsafe { with_context(Nbt::single, tag)(input)?.unwrap_unchecked() },
         }))
     }

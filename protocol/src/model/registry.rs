@@ -1,5 +1,5 @@
-use bevy::prelude::Resource;
 use crate::serde;
+use bevy::prelude::Resource;
 use std::collections::HashMap;
 
 use serde::{ser::SerializeStruct, Serialize};
