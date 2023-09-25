@@ -22,7 +22,7 @@ jobs:
         path: target
         key: target_dirs
     - name: Rustup
-      run: rustup update; rustup show
+      run: rustup show
     - name: Build
       run: cargo build --verbose
     - name: Run tests
