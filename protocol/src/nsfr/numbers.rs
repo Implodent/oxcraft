@@ -112,8 +112,8 @@ macro_rules! implement_common {
             ///
             /// Basic usage:
             ///
-            /// ```
-            /// use ux::*;
+            /// ```helpplease
+            /// use oxcr_protocol::nsfr::*;
             ///
             /// assert_eq!(u31::new(64), u31::from(64u8));
             ///
@@ -134,8 +134,8 @@ macro_rules! implement_common {
             ///
             /// Basic usage:
             ///
-            /// ```
-            /// use ux::*;
+            /// ```helpplease
+            /// use oxcr_protocol::nsfr::*;
             ///
             /// assert_eq!(i5::MIN.wrapping_sub(i5::new(1)), i5::MAX);
             ///
@@ -153,8 +153,8 @@ macro_rules! implement_common {
             ///
             /// Basic usage:
             ///
-            /// ```
-            /// use ux::*;
+            /// ```helpplease
+            /// use oxcr_protocol::nsfr::*;
             ///
             /// assert_eq!(i5::MAX.wrapping_add(i5::new(1)), i5::MIN);
             ///

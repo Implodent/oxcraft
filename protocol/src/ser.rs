@@ -729,8 +729,8 @@ impl Endian for Native {}
 /// # Examples
 /// ```
 /// # use aott::prelude::*;
-/// # use aott::ser::*;
-/// assert_eq!(deserialize_from::<_, extra::Err<&[u8]>, _>(&[0x63][..]), Ok(Number(99u8, Big)));
+/// # use oxcr_protocol::ser::*;
+/// assert_eq!(Number::<u8, Big>::deserialize.parse(&[0x63]).unwrap(), Number(99u8, Big));
 /// ```
 #[derive(Copy, Clone, Deref, DerefMut, Debug, Display, PartialEq, Eq)]
 #[display(bound = "N: core::fmt::Display")]
