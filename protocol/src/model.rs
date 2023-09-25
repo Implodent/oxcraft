@@ -267,3 +267,50 @@ pub struct ChatType;
 impl RegistryItem for ChatType {
     const REGISTRY: &'static str = "minecraft:chat_type";
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(crate = "serde")]
+pub struct DamageType {
+    pub exhaustion: f32,
+    pub message_id: &'static str,
+    pub scaling: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub death_message_type: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effects: Option<&'static str>,
+}
+
+macro declare_thing($vis:vis, $($name:ident { $($field:ident : $value:expr),* }),*) {
+    $($vis const $name: Self = Self {
+        $($field: $value,)*
+        ..Self::EMPTY
+    };)*
+}
+
+impl DamageType {
+    const EMPTY: Self = Self {
+        exhaustion: 0.0,
+        message_id: "",
+        scaling: "",
+        death_message_type: None,
+        effects: None,
+    };
+
+    declare_thing! {pub,
+        ARROW {
+            exhaustion: 0.1,
+            message_id: "arrow",
+            scaling: "when_caused_by_living_non_player"
+        },
+        BAD_RESPAWN_POINT {
+            exhaustion: 0.1,
+            message_id: "badRespawnPoint",
+            scaling: "always",
+            death_message_type: Some("intentional_game_design")
+        }
+    }
+}
+
+impl RegistryItem for DamageType {
+    const REGISTRY: &'static str = "minecraft:damage_type";
+}

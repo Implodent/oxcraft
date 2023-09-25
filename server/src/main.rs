@@ -21,10 +21,9 @@ use oxcr_protocol::{
                 self, PingRequest, Players, PongResponse, Sample, StatusRequest, StatusResponse,
                 StatusResponseJson,
             },
-            SerializedPacket,
         },
         registry::Registry,
-        Difficulty, DimensionType, State, VarInt, WorldgenBiome, PROTOCOL_VERSION,
+        DamageType, Difficulty, DimensionType, State, VarInt, WorldgenBiome, PROTOCOL_VERSION,
     },
     nbt::{nbt_serde, Nbt, NbtList, NbtTagType},
     nsfr::when_the_miette,
@@ -97,10 +96,16 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
             let _ = w.world.entity_mut(ent_id).insert(player);
             let dimension_types = w.world.resource::<Registry<DimensionType>>();
             let worldgen_biomes = w.world.resource::<Registry<WorldgenBiome>>();
+            let damage_types = w.world.resource::<Registry<DamageType>>();
+
             Ok::<_, oxcr_protocol::nbt::NbtError>(IndexMap::from([
                 (
                     "minecraft:dimension_type".to_string(),
                     nbt_serde(dimension_types)?,
+                ),
+                (
+                    "minecraft:damage_type".to_string(),
+                    nbt_serde(damage_types)?,
                 ),
                 (
                     "minecraft:worldgen/biome".to_string(),
@@ -332,6 +337,7 @@ fn on_login(rt: Res<TokioTasksRuntime>, mut ev: EventReader<PlayerLoginEvent>, q
 fn init_registries(
     mut dimension_types: ResMut<Registry<DimensionType>>,
     mut worldgen_biomes: ResMut<Registry<WorldgenBiome>>,
+    mut damage_types: ResMut<Registry<DamageType>>,
 ) {
     info!("initializing registries...");
 
@@ -342,6 +348,14 @@ fn init_registries(
     worldgen_biomes
         .0
         .extend([("minecraft:plains".to_string(), WorldgenBiome::PLAINS)]);
+
+    damage_types.0.extend([
+        ("minecraft:arrow".to_string(), DamageType::ARROW),
+        (
+            "minecraft:bad_respawn_point".to_string(),
+            DamageType::BAD_RESPAWN_POINT,
+        ),
+    ]);
 
     info!(dimension_types=?dimension_types.0, worldgen_biomes=?worldgen_biomes.0, "successfully initialized registries.");
 }
@@ -367,6 +381,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .init_resource::<Registry<DimensionType>>()
         .init_resource::<Registry<WorldgenBiome>>()
+        .init_resource::<Registry<DamageType>>()
         .add_systems(Startup, (init_registries, listen))
         .add_systems(Update, on_login)
         .run();
