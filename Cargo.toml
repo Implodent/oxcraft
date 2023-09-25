@@ -2,6 +2,7 @@
 members = [
         "protocol",
         "server",
+        "cli"
 ]
 resolver = "2"
 
