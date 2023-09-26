@@ -1,3 +1,5 @@
+#![feature(iterator_try_collect)]
+
 use oxcr_protocol::miette::Report;
 
 mod cli;
@@ -10,6 +12,14 @@ fn run() -> Result<(), Report> {
         None => panic!("what"),
         Some(path) => {
             let arguments: String = args.collect();
+            Ok(())
         }
+    }
+}
+
+fn main() {
+    match run() {
+        Ok(()) => {}
+        Err(e) => {}
     }
 }

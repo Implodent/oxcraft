@@ -19,10 +19,17 @@ pub enum Expectation {
     AnyOf(Vec<char>),
     #[error("end of input")]
     EndOfInput,
+    #[error("a digit with radix {_0}")]
+    Digit(u32),
 }
 
 #[derive(miette::Diagnostic, thiserror::Error, Debug)]
+#[error("{kind}")]
 pub struct ParseError {
     #[label = "here"]
     pub span: SourceSpan,
+    #[diagnostic(transparent)]
+    #[diagnostic_source]
+    #[source]
+    pub kind: ParseErrorKind,
 }
