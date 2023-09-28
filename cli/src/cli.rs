@@ -5,10 +5,10 @@ use std::{marker::PhantomData, path::PathBuf};
 use aott::prelude::*;
 use oxcr_protocol::{
     aott::{self, pfn_type},
-    bytes::Bytes,
+    bytes::{BufMut, Bytes, BytesMut},
 };
 
-use crate::error::{ParseError, ParseErrorKind};
+use crate::error::{Expectation, ParseError, ParseErrorKind};
 
 pub struct Extra<C = ()>(PhantomData<C>);
 impl<'a, C> ParserExtras<&'a str> for Extra<C> {
@@ -39,7 +39,7 @@ pub enum Cli {
     Serialization(CliSer),
 }
 
-fn radixshit<'a>(radix: u32, cha: char) -> pfn_type!(&'a str, Bytes, Extra) {
+fn numbah<'a>(radix: u32, cha: char) -> pfn_type!(&'a str, Bytes, Extra) {
     |input| {
         just(['0', cha])
             .ignore_then(text::int(radix))
@@ -64,9 +64,29 @@ fn radixshit<'a>(radix: u32, cha: char) -> pfn_type!(&'a str, Bytes, Extra) {
 
 #[parser(extras = Extra)]
 fn byte_input(input: &str) -> ByteInput {
-    choice((radixshit(8, 'o'),))
-        .map(ByteInput::Data)
-        .parse_with(input)
+    choice((
+        numbah(16, 'x'),
+        numbah(2, 'b'),
+        numbah(8, 'o'),
+        numbah(10, 'd'),
+    ))
+    .or(text::int(16).try_map_with_span(|x: &str, span| {
+        x.chars()
+            .map(|c| {
+                c.to_digit(16)
+                    .ok_or_else(|| ParseError {
+                        span: span.into(),
+                        kind: ParseErrorKind::Expected {
+                            expected: Expectation::Digit(8),
+                            found: c,
+                        },
+                    })
+                    .map(|x| x.try_into().expect("not a u8"))
+            })
+            .try_collect()
+    }))
+    .map(ByteInput::Data)
+    .parse_with(input)
 }
 
 #[parser(extras = Extra)]

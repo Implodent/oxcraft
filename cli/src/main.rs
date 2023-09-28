@@ -1,6 +1,9 @@
 #![feature(iterator_try_collect)]
 
-use oxcr_protocol::miette::Report;
+use oxcr_protocol::{
+    miette::{self, bail, Report},
+    nsfr::when_the_miette,
+};
 
 mod cli;
 mod error;
@@ -9,7 +12,7 @@ fn run() -> Result<(), Report> {
     let mut args = std::env::args();
 
     match args.next() {
-        None => panic!("what"),
+        None => bail!("the"),
         Some(path) => {
             let arguments: String = args.collect();
             Ok(())
@@ -18,8 +21,8 @@ fn run() -> Result<(), Report> {
 }
 
 fn main() {
-    match run() {
+    match when_the_miette(run()) {
         Ok(()) => {}
-        Err(e) => {}
+        Err(_) => {}
     }
 }

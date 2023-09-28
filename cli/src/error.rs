@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use oxcr_protocol::{
     aott,
     miette::{self, SourceSpan},
@@ -32,4 +34,48 @@ pub struct ParseError {
     #[diagnostic_source]
     #[source]
     pub kind: ParseErrorKind,
+}
+
+impl ParseError {
+    pub fn new(span: Range<usize>, kind: ParseErrorKind) -> Self {
+        Self {
+            span: span.into(),
+            kind,
+        }
+    }
+}
+
+impl<'a> aott::error::Error<&'a str> for ParseError {
+    type Span = Range<usize>;
+
+    fn unexpected_eof(
+        span: Self::Span,
+        _expected: Option<Vec<<&'a str as aott::prelude::InputType>::Token>>,
+    ) -> Self {
+        Self::new(span, ParseErrorKind::UnexpectedEof)
+    }
+
+    fn expected_token_found(
+        span: Self::Span,
+        expected: Vec<char>,
+        found: aott::MaybeRef<'_, char>,
+    ) -> Self {
+        Self::new(
+            span,
+            ParseErrorKind::Expected {
+                expected: Expectation::AnyOf(expected),
+                found: found.into_clone(),
+            },
+        )
+    }
+
+    fn expected_eof_found(span: Self::Span, found: aott::MaybeRef<'_, char>) -> Self {
+        Self::new(
+            span,
+            ParseErrorKind::Expected {
+                expected: Expectation::EndOfInput,
+                found: found.into_clone(),
+            },
+        )
+    }
 }
