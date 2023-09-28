@@ -1,11 +1,15 @@
 //! Spanned-clap, lol
 
-use std::{marker::PhantomData, path::PathBuf};
+use std::{marker::PhantomData, path::PathBuf, str::FromStr};
 
 use aott::prelude::*;
 use oxcr_protocol::{
-    aott::{self, pfn_type},
+    aott::{
+        self, pfn_type,
+        text::{ascii::ident, inline_whitespace, int, whitespace},
+    },
     bytes::{BufMut, Bytes, BytesMut},
+    tracing::{level_filters::LevelFilter, Level},
 };
 
 use crate::error::{Expectation, ParseError, ParseErrorKind};
@@ -16,12 +20,6 @@ impl<'a, C> ParserExtras<&'a str> for Extra<C> {
     type Error = crate::error::ParseError;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CliSerOp {
-    Encode,
-    Decode,
-}
-
 #[derive(Debug, Clone)]
 pub enum ByteInput {
     File(PathBuf),
@@ -29,18 +27,32 @@ pub enum ByteInput {
 }
 
 #[derive(Debug, Clone)]
-pub struct CliSer {
-    pub operation: CliSerOp,
-    pub inp: ByteInput,
+pub enum CliCommand {
+    Decode(ByteInput),
+    Help,
 }
 
 #[derive(Debug, Clone)]
-pub enum Cli {
-    Serialization(CliSer),
+pub struct Cli {
+    pub level: LevelFilter,
+    pub command: CliCommand,
+}
+
+#[derive(Debug, Clone)]
+pub enum Flag {
+    Level(Level),
+    Help,
+    Decode(ByteInput),
+}
+
+#[derive(Debug)]
+enum FlagName<'a> {
+    Short(&'a str),
+    Long(&'a str),
 }
 
 fn numbah<'a>(radix: u32, cha: char) -> pfn_type!(&'a str, Bytes, Extra) {
-    |input| {
+    move |input| {
         just(['0', cha])
             .ignore_then(text::int(radix))
             .try_map_with_span(|x: &str, span| {
@@ -48,7 +60,7 @@ fn numbah<'a>(radix: u32, cha: char) -> pfn_type!(&'a str, Bytes, Extra) {
                     .map(|c| {
                         c.to_digit(radix)
                             .ok_or_else(|| ParseError {
-                                span: span.into(),
+                                span: span.clone().into(),
                                 kind: ParseErrorKind::Expected {
                                     expected: Expectation::Digit(8),
                                     found: c,
@@ -75,7 +87,7 @@ fn byte_input(input: &str) -> ByteInput {
             .map(|c| {
                 c.to_digit(16)
                     .ok_or_else(|| ParseError {
-                        span: span.into(),
+                        span: span.clone().into(),
                         kind: ParseErrorKind::Expected {
                             expected: Expectation::Digit(8),
                             found: c,
@@ -90,4 +102,96 @@ fn byte_input(input: &str) -> ByteInput {
 }
 
 #[parser(extras = Extra)]
-pub fn yay(input: &str) -> Cli {}
+fn from_str<T: core::str::FromStr>(input: &str) -> T
+where
+    ParseErrorKind: From<T::Err>,
+{
+    T::from_str(input.input.slice_from(input.offset..)).map_err(|error| ParseError {
+        span: (input.offset, input.offset + 1).into(),
+        kind: error.into(),
+    })
+}
+
+#[parser(extras = Extra)]
+fn flag_list(input: &str) -> Vec<FlagName<'a>> {
+    just("-")
+        .ignore_then(choice((
+            slice(filter(|thing: &char| *thing != ' '))
+                .map(FlagName::Short)
+                .repeated(),
+            just("-")
+                .ignore_then(ident)
+                .map(|name| vec![FlagName::Long(name)]),
+        )))
+        .parse_with(input)
+}
+
+#[parser(extras = Extra)]
+fn flags(input: &str) -> Vec<Flag> {
+    let before = input.offset;
+
+    let flag_list = dbg!(flag_list(input)?);
+    flag_list
+        .into_iter()
+        .map(|flag| -> Result<Flag, crate::error::ParseError> {
+            try {
+                match flag {
+                    FlagName::Short("l") | FlagName::Long("level") => {
+                        one_of(" =")(input)?;
+                        let before_ = input.offset;
+                        Flag::Level(
+                            Level::from_str(ident.or(slice(int(10))).parse_with(input)?).map_err(
+                                |error| ParseError {
+                                    span: (before_, input.offset).into(),
+                                    kind: error.into(),
+                                },
+                            )?,
+                        )
+                    }
+                    FlagName::Short("D") | FlagName::Long("debug") => Flag::Level(Level::DEBUG),
+                    FlagName::Short("d")
+                    | FlagName::Long("decode")
+                    | FlagName::Long("deserialize") => {
+                        one_of(" =")(input)?;
+
+                        Flag::Decode(byte_input(input)?)
+                    }
+                    FlagName::Short("h") | FlagName::Long("help") => Flag::Help,
+                    FlagName::Short(flag) | FlagName::Long(flag) => Err(ParseError {
+                        span: input.span_since(before).into(),
+                        kind: ParseErrorKind::UnknownFlag(flag.to_owned()),
+                    })?,
+                }
+            }
+        })
+        .try_collect()
+}
+
+fn flags_handle<'a>(
+    cli: &mut Cli,
+    input: &mut Input<&'a str, Extra>,
+) -> PResult<&'a str, (), Extra> {
+    fn handle(cli: &mut Cli, flag: Flag) {
+        match flag {
+            Flag::Level(level) => cli.level = LevelFilter::from(level),
+            Flag::Help => cli.command = CliCommand::Help,
+            Flag::Decode(input) => cli.command = CliCommand::Decode(input),
+        }
+    }
+
+    try { flags(input)?.into_iter().for_each(|flag| handle(cli, flag)) }
+}
+
+#[parser(extras = Extra)]
+pub fn yay(input: &str) -> Cli {
+    try {
+        let mut cli = Cli {
+            level: LevelFilter::OFF,
+            command: CliCommand::Help,
+        };
+
+        flags_handle(&mut cli, input)?;
+
+        cli
+    }
+}

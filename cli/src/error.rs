@@ -1,10 +1,11 @@
-use std::ops::Range;
+use std::{ops::Range, str::FromStr};
 
 use oxcr_protocol::{
     aott,
     miette::{self, SourceSpan},
     ser::any_of,
     thiserror,
+    tracing::{metadata::ParseLevelError, Level},
 };
 
 #[derive(miette::Diagnostic, thiserror::Error, Debug)]
@@ -13,6 +14,10 @@ pub enum ParseErrorKind {
     Expected { expected: Expectation, found: char },
     #[error("unexpected end of input")]
     UnexpectedEof,
+    #[error("parsing a Level failed: {_0}")]
+    ParseLevel(#[from] ParseLevelError),
+    #[error("unknown flag encountered: {_0}")]
+    UnknownFlag(String),
 }
 
 #[derive(Debug, thiserror::Error)]

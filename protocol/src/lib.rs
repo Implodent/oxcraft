@@ -29,6 +29,7 @@ pub mod serde {
 }
 pub use indexmap;
 pub use miette;
+pub use tracing;
 
 pub async fn rwlock_set<T: 'static>(rwlock: &RwLock<T>, value: T) {
     rwlock.set(value).await
