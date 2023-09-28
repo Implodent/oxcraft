@@ -15,7 +15,7 @@ use crate::cli::{ByteInput, Cli, CliCommand};
 mod cli;
 mod error;
 
-fn run(path: String, args: &str) -> Result<(), Report> {
+fn run(_path: String, args: &str) -> Result<(), Report> {
     let tsub_guard = tracing_subscriber::fmt()
         .pretty()
         .with_env_filter(EnvFilter::from_env("OXCR_LOG"))
@@ -28,7 +28,7 @@ fn run(path: String, args: &str) -> Result<(), Report> {
 
     drop(tsub_guard);
 
-    let tsub_guard = tracing_subscriber::fmt()
+    let _tsub_guard = tracing_subscriber::fmt()
         .with_env_filter(cli.level.to_string())
         .pretty()
         .set_default();
@@ -53,7 +53,7 @@ fn run(path: String, args: &str) -> Result<(), Report> {
             };
             let deserialized: LoginPlay = spack.try_deserialize(LoginPlay::STATE)?;
 
-            debug!("{:#?}", deserialized);
+            println!("{:#?}", deserialized);
         }
     }
 
@@ -66,7 +66,6 @@ fn main() -> Result<(), Report> {
     match args.next() {
         None => bail!("the"),
         Some(path) => {
-            dbg!(&path);
             let args = args.collect::<Vec<String>>().join(" ");
             run(path, &args)?;
 
@@ -75,4 +74,17 @@ fn main() -> Result<(), Report> {
     }
 }
 
-fn help() {}
+fn help() {
+    println!(r#"
+    This is the OxCraft CLI. Here you can serialize and deserialize packets (currently only LoginPlay).
+
+    Example usage:
+    cargo run -p oxcr_cli -- -Dd 0xbd7d9a9f7e
+    This will deserialize turn on debug logging and deserialize LoginPlay from the data 0xbd7d etc.
+
+    Flags:
+    -l --level <LEVEL> what log level
+    -D --debug same as --level debug
+    -d --deserialize --decode <BINARY/OCTAL/HEX/DECIMAL (0d) DATA> deserializes a packet from <DATA>, then debug-logs it.
+    "#);
+}

@@ -5,7 +5,7 @@ use oxcr_protocol::{
     miette::{self, SourceSpan},
     ser::any_of,
     thiserror,
-    tracing::{metadata::ParseLevelError, Level},
+    tracing::metadata::ParseLevelError,
 };
 
 #[derive(miette::Diagnostic, thiserror::Error, Debug)]

@@ -102,18 +102,10 @@ fn byte_input(input: &str) -> ByteInput {
 }
 
 #[parser(extras = Extra)]
-fn from_str<T: core::str::FromStr>(input: &str) -> T
-where
-    ParseErrorKind: From<T::Err>,
-{
-    T::from_str(input.input.slice_from(input.offset..)).map_err(|error| ParseError {
-        span: (input.offset, input.offset + 1).into(),
-        kind: error.into(),
-    })
-}
-
-#[parser(extras = Extra)]
 fn flag_list(input: &str) -> Vec<FlagName<'a>> {
+    if input.offset.saturating_sub(1) >= input.input.len() {
+        return Ok(vec![]);
+    }
     just("-")
         .ignore_then(choice((
             slice(filter(|thing: &char| *thing != ' '))
@@ -130,8 +122,7 @@ fn flag_list(input: &str) -> Vec<FlagName<'a>> {
 fn flags(input: &str) -> Vec<Flag> {
     let before = input.offset;
 
-    let flag_list = dbg!(flag_list(input)?);
-    flag_list
+    flag_list(input)?
         .into_iter()
         .map(|flag| -> Result<Flag, crate::error::ParseError> {
             try {
