@@ -1,18 +1,19 @@
 //! Spanned-clap, lol
 
+use itertools::Itertools;
 use std::{marker::PhantomData, path::PathBuf, str::FromStr};
 
 use aott::prelude::*;
 use oxcr_protocol::{
     aott::{
         self, pfn_type,
-        text::{ascii::ident, inline_whitespace, int, whitespace},
+        text::{ascii::ident, digits, inline_whitespace, int, whitespace},
     },
     bytes::{BufMut, Bytes, BytesMut},
     tracing::{level_filters::LevelFilter, Level},
 };
 
-use crate::error::{Expectation, ParseError, ParseErrorKind};
+use crate::error::{Expectation, ParseError};
 
 pub struct Extra<C = ()>(PhantomData<C>);
 impl<'a, C> ParserExtras<&'a str> for Extra<C> {
@@ -30,6 +31,7 @@ pub enum ByteInput {
 pub enum CliCommand {
     Decode(ByteInput),
     Help,
+    VarInt(ByteInput),
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +45,7 @@ pub enum Flag {
     Level(Level),
     Help,
     Decode(ByteInput),
+    VarInt(ByteInput),
 }
 
 #[derive(Debug)]
@@ -54,50 +57,35 @@ enum FlagName<'a> {
 fn numbah<'a>(radix: u32, cha: char) -> pfn_type!(&'a str, Bytes, Extra) {
     move |input| {
         just(['0', cha])
-            .ignore_then(text::int(radix))
-            .try_map_with_span(|x: &str, span| {
+            .ignore_then(text::digits(radix).slice())
+            .map(|x: &str| {
                 x.chars()
-                    .map(|c| {
-                        c.to_digit(radix)
-                            .ok_or_else(|| ParseError {
-                                span: span.clone().into(),
-                                kind: ParseErrorKind::Expected {
-                                    expected: Expectation::Digit(8),
-                                    found: c,
-                                },
-                            })
-                            .map(|x| x.try_into().expect("not a u8"))
+                    .batching(|it| {
+                        let mut s = it.next()?.to_string();
+                        it.next().map(|c| s.push(c));
+                        Some(u8::from_str_radix(&s, radix).expect("a u8..."))
                     })
-                    .try_collect()
+                    .collect()
             })
             .parse_with(input)
     }
 }
 
 #[parser(extras = Extra)]
+fn path_buf(input: &str) -> PathBuf {
+    Ok(PathBuf::from_str(input.input.slice_from(input.offset..)).unwrap())
+}
+
+#[parser(extras = Extra)]
 fn byte_input(input: &str) -> ByteInput {
-    choice((
+    (choice((
         numbah(16, 'x'),
         numbah(2, 'b'),
         numbah(8, 'o'),
         numbah(10, 'd'),
     ))
-    .or(text::int(16).try_map_with_span(|x: &str, span| {
-        x.chars()
-            .map(|c| {
-                c.to_digit(16)
-                    .ok_or_else(|| ParseError {
-                        span: span.clone().into(),
-                        kind: ParseErrorKind::Expected {
-                            expected: Expectation::Digit(8),
-                            found: c,
-                        },
-                    })
-                    .map(|x| x.try_into().expect("not a u8"))
-            })
-            .try_collect()
-    }))
-    .map(ByteInput::Data)
+    .map(ByteInput::Data))
+    .or(path_buf.map(ByteInput::File))
     .parse_with(input)
 }
 
@@ -131,12 +119,11 @@ fn flags(input: &str) -> Vec<Flag> {
                         one_of(" =")(input)?;
                         let before_ = input.offset;
                         Flag::Level(
-                            Level::from_str(ident.or(slice(int(10))).parse_with(input)?).map_err(
-                                |error| ParseError {
-                                    span: (before_, input.offset).into(),
-                                    kind: error.into(),
-                                },
-                            )?,
+                            Level::from_str(ident.or(slice(digits(10))).parse_with(input)?)
+                                .map_err(|actual| ParseError::ParseLevel {
+                                    at: (before_, input.offset).into(),
+                                    actual,
+                                })?,
                         )
                     }
                     FlagName::Short("D") | FlagName::Long("debug") => Flag::Level(Level::DEBUG),
@@ -147,10 +134,15 @@ fn flags(input: &str) -> Vec<Flag> {
 
                         Flag::Decode(byte_input(input)?)
                     }
+                    FlagName::Short("V") | FlagName::Long("varint") => {
+                        one_of(" =")(input)?;
+
+                        Flag::VarInt(byte_input(input)?)
+                    }
                     FlagName::Short("h") | FlagName::Long("help") => Flag::Help,
-                    FlagName::Short(flag) | FlagName::Long(flag) => Err(ParseError {
-                        span: input.span_since(before).into(),
-                        kind: ParseErrorKind::UnknownFlag(flag.to_owned()),
+                    FlagName::Short(flag) | FlagName::Long(flag) => Err(ParseError::UnknownFlag {
+                        flag: flag.to_owned(),
+                        at: input.span_since(before).into(),
                     })?,
                 }
             }
@@ -167,9 +159,9 @@ fn flags_handle<'a>(
             Flag::Level(level) => cli.level = LevelFilter::from(level),
             Flag::Help => cli.command = CliCommand::Help,
             Flag::Decode(input) => cli.command = CliCommand::Decode(input),
+            Flag::VarInt(input) => cli.command = CliCommand::VarInt(input),
         }
     }
-
     try { flags(input)?.into_iter().for_each(|flag| handle(cli, flag)) }
 }
 

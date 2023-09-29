@@ -9,15 +9,41 @@ use oxcr_protocol::{
 };
 
 #[derive(miette::Diagnostic, thiserror::Error, Debug)]
-pub enum ParseErrorKind {
+pub enum ParseError {
     #[error("expected {expected}, found {found}")]
-    Expected { expected: Expectation, found: char },
-    #[error("unexpected end of input")]
-    UnexpectedEof,
-    #[error("parsing a Level failed: {_0}")]
-    ParseLevel(#[from] ParseLevelError),
-    #[error("unknown flag encountered: {_0}")]
-    UnknownFlag(String),
+    #[diagnostic(code(cli::expected))]
+    Expected {
+        expected: Expectation,
+        found: char,
+        #[label = "here"]
+        at: SourceSpan,
+    },
+    #[error("unexpected end of input{}", .expected.as_ref().map(|expectation| format!(", expected {expectation}")).unwrap_or_else(String::new))]
+    #[diagnostic(
+        code(cli::unexpected_eof),
+        help("try giving it more input next time, I guess?")
+    )]
+    UnexpectedEof {
+        #[label = "here"]
+        at: SourceSpan,
+        #[label = "last data here"]
+        last_data_at: Option<SourceSpan>,
+        expected: Option<Expectation>,
+    },
+    #[error("parsing a Level failed: {actual}")]
+    #[diagnostic(code(cli::parse_level_error))]
+    ParseLevel {
+        actual: ParseLevelError,
+        #[label = "here"]
+        at: SourceSpan,
+    },
+    #[error("unknown flag encountered: {flag}")]
+    #[diagnostic(code(cli::unknown_flag))]
+    UnknownFlag {
+        flag: String,
+        #[label = "here"]
+        at: SourceSpan,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -30,34 +56,18 @@ pub enum Expectation {
     Digit(u32),
 }
 
-#[derive(miette::Diagnostic, thiserror::Error, Debug)]
-#[error("{kind}")]
-pub struct ParseError {
-    #[label = "here"]
-    pub span: SourceSpan,
-    #[diagnostic(transparent)]
-    #[diagnostic_source]
-    #[source]
-    pub kind: ParseErrorKind,
-}
-
-impl ParseError {
-    pub fn new(span: Range<usize>, kind: ParseErrorKind) -> Self {
-        Self {
-            span: span.into(),
-            kind,
-        }
-    }
-}
-
 impl<'a> aott::error::Error<&'a str> for ParseError {
     type Span = Range<usize>;
 
     fn unexpected_eof(
         span: Self::Span,
-        _expected: Option<Vec<<&'a str as aott::prelude::InputType>::Token>>,
+        expected: Option<Vec<<&'a str as aott::prelude::InputType>::Token>>,
     ) -> Self {
-        Self::new(span, ParseErrorKind::UnexpectedEof)
+        Self::UnexpectedEof {
+            at: span.into(),
+            last_data_at: None,
+            expected: expected.map(Expectation::AnyOf),
+        }
     }
 
     fn expected_token_found(
@@ -65,22 +75,18 @@ impl<'a> aott::error::Error<&'a str> for ParseError {
         expected: Vec<char>,
         found: aott::MaybeRef<'_, char>,
     ) -> Self {
-        Self::new(
-            span,
-            ParseErrorKind::Expected {
-                expected: Expectation::AnyOf(expected),
-                found: found.into_clone(),
-            },
-        )
+        Self::Expected {
+            expected: Expectation::AnyOf(expected),
+            found: found.into_clone(),
+            at: span.into(),
+        }
     }
 
     fn expected_eof_found(span: Self::Span, found: aott::MaybeRef<'_, char>) -> Self {
-        Self::new(
-            span,
-            ParseErrorKind::Expected {
-                expected: Expectation::EndOfInput,
-                found: found.into_clone(),
-            },
-        )
+        Self::Expected {
+            expected: Expectation::EndOfInput,
+            found: found.into_clone(),
+            at: span.into(),
+        }
     }
 }
