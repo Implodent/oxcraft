@@ -1,5 +1,6 @@
 #![feature(try_blocks, associated_type_defaults, decl_macro, iterator_try_collect)]
 
+mod cli;
 mod model;
 
 use bevy::prelude::*;
@@ -7,15 +8,15 @@ use model::DifficultySetting;
 use oxcr_protocol::{
     executor::{TaskContext, TokioTasksRuntime},
     indexmap::IndexMap,
-    miette,
+    miette::{self, IntoDiagnostic, Report},
     model::{
         chat::{self, *},
         packets::{
             handshake::{Handshake, HandshakeNextState},
             login::{DisconnectLogin, LoginStart, LoginSuccess},
             play::{
-                Abilities, ChangeDifficulty, DisconnectPlay, GameMode, LoginPlay, PlayerAbilities,
-                PreviousGameMode, SetDefaultSpawnPosition,
+                Abilities, ChangeDifficulty, DisconnectPlay, FeatureFlags, GameMode, LoginPlay,
+                PlayerAbilities, PreviousGameMode, SetDefaultSpawnPosition,
             },
             status::{
                 self, PingRequest, Players, PongResponse, Sample, StatusRequest, StatusResponse,
@@ -159,6 +160,10 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
     let difficulty = cx
         .run_on_main_thread(move |w| *w.world.resource::<DifficultySetting>())
         .await;
+
+    net.send_packet(FeatureFlags {
+        feature_flags: Array::new(&[FeatureFlags::FEATURE_VANILLA]),
+    })?;
 
     net.plugin_message(Identifier::MINECRAFT_BRAND, "implodent")?;
 
@@ -361,7 +366,7 @@ fn init_registries(
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Report> {
     tracing_subscriber::fmt()
         .pretty()
         .with_env_filter(EnvFilter::from_env("OXCR_LOG"))
@@ -369,7 +374,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     miette::set_panic_hook();
 
-    let tcp = tokio::net::TcpListener::bind(("127.0.0.1", 25565)).await?;
+    let cli = cli::Cli::parse_args()?;
+
+    debug!("{cli:#?}");
+
+    let tcp = tokio::net::TcpListener::bind(("127.0.0.1", cli.port))
+        .await
+        .into_diagnostic()?;
+
+    info!("Starting server on port {}", cli.port);
 
     App::new()
         .add_plugins(ProtocolPlugin)

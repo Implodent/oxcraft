@@ -1,4 +1,4 @@
-use std::{ops::Range, str::FromStr};
+use std::{borrow::Cow, num::ParseIntError, ops::Range, str::FromStr};
 
 use oxcr_protocol::{
     aott,
@@ -17,6 +17,8 @@ pub enum ParseError {
         found: char,
         #[label = "here"]
         at: SourceSpan,
+        #[help]
+        help: Option<Cow<'static, str>>,
     },
     #[error("unexpected end of input{}", .expected.as_ref().map(|expectation| format!(", expected {expectation}")).unwrap_or_else(String::new))]
     #[diagnostic(
@@ -43,6 +45,18 @@ pub enum ParseError {
         flag: String,
         #[label = "here"]
         at: SourceSpan,
+    },
+    #[error("expected a number with radix {radix}, got {actual}")]
+    #[diagnostic(code(cli::expected_number))]
+    ExpectedNumber {
+        radix: u32,
+        actual: String,
+        #[label = "here"]
+        at: SourceSpan,
+        #[help]
+        help: Option<Cow<'static, str>>,
+        #[source]
+        error: ParseIntError,
     },
 }
 
@@ -79,6 +93,7 @@ impl<'a> aott::error::Error<&'a str> for ParseError {
             expected: Expectation::AnyOf(expected),
             found: found.into_clone(),
             at: span.into(),
+            help: None,
         }
     }
 
@@ -87,6 +102,7 @@ impl<'a> aott::error::Error<&'a str> for ParseError {
             expected: Expectation::EndOfInput,
             found: found.into_clone(),
             at: span.into(),
+            help: None,
         }
     }
 }

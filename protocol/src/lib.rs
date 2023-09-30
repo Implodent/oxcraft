@@ -156,6 +156,7 @@ impl PlayerNet {
 
             return Err::<!, crate::error::Error>(e);
         });
+
         let recv_task = tokio::spawn(async move {
             async {
                 let mut buf = BytesMut::new();

@@ -20,7 +20,7 @@ mod cli;
 mod error;
 
 fn run(_path: String, args: &str) -> Result<(), Report> {
-    let tsub_guard = tracing_subscriber::fmt()
+    let tracing_set_default_level = tracing_subscriber::fmt()
         .pretty()
         .with_env_filter(EnvFilter::from_env("OXCR_LOG"))
         .finish()
@@ -30,9 +30,9 @@ fn run(_path: String, args: &str) -> Result<(), Report> {
         .parse(args)
         .map_err(|parse_error| Report::new(parse_error).with_source_code(args.to_owned()))?;
 
-    drop(tsub_guard);
+    drop(tracing_set_default_level);
 
-    let _tsub_guard = tracing_subscriber::fmt()
+    let _tracing_set_real_level = tracing_subscriber::fmt()
         .with_env_filter(cli.level.to_string())
         .pretty()
         .set_default();
@@ -43,17 +43,15 @@ fn run(_path: String, args: &str) -> Result<(), Report> {
         CliCommand::Help => help(),
         CliCommand::Decode(inp) => {
             let bytes = read_byte_input(inp)?;
-            let spack = SerializedPacket {
-                length: LoginPlay::ID.length_of() + bytes.len(),
-                data: bytes,
-                id: LoginPlay::ID,
-            };
+            debug!("{bytes:?}");
+            let spack = SerializedPacket::deserialize.parse(&bytes)?;
             let deserialized: LoginPlay = spack.try_deserialize(LoginPlay::STATE)?;
 
             println!("{:#?}", deserialized);
         }
         CliCommand::VarInt(inp) => {
             let bytes = read_byte_input(inp)?;
+
             println!(
                 "{:#?}",
                 VarInt::<i64>::deserialize
@@ -62,7 +60,8 @@ fn run(_path: String, args: &str) -> Result<(), Report> {
                     .map_err(reconcile(bytes))?
             );
         }
-    }
+        CliCommand::Decompress(inp) => todo!(),
+    };
 
     Ok(())
 }

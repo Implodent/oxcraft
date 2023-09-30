@@ -120,6 +120,102 @@ impl Serialize for SerializedPacket {
 }
 
 #[derive(Debug, Clone)]
+pub struct SerializedPacketCompressed {
+    pub length: usize,
+    pub data_length: usize,
+    pub id: Compress<super::VarInt, Zlib>,
+    pub data: Compress<Bytes, Zlib>,
+}
+
+impl SerializedPacketCompressed {
+    pub fn new<P: Packet + Serialize>(packet: P) -> Result<Self, Error> {
+        Self::new_ref(&packet)
+    }
+
+    pub fn new_ref<P: Packet + Serialize + ?Sized>(packet: &P) -> Result<Self, Error> {
+        try {
+            let data = packet.serialize()?;
+            let id = P::ID;
+            let data_length = id.length_of() + data.len();
+            let datalength = VarInt::<i32>(data_length.try_into().unwrap());
+            let length = datalength.length_of() + Compress(datalength, Zlib).serialize()?.len();
+            Self {
+                length,
+                data_length,
+                id: Compress(id, Zlib),
+                data: Compress(data, Zlib),
+            }
+        }
+    }
+
+    pub fn try_deserialize<P: Packet + Deserialize<Context = PacketContext>>(
+        &self,
+        state: State,
+    ) -> Result<P, Error> {
+        let context = PacketContext {
+            id: self.id.0,
+            state,
+        };
+
+        P::deserialize
+            .parse_with_context(self.data.0.as_ref(), context)
+            .map_err(|e| match e {
+                Error::Ser(error) => Error::SerSrc(WithSource {
+                    source: BytesSource::new(
+                        self.data.0.clone(),
+                        Some(format!("packet_0x{:x}.bin", self.id.0 .0)),
+                    ),
+                    span: error.span,
+                    kind: error.kind,
+                }),
+                e => e,
+            })
+    }
+}
+
+impl Deserialize for SerializedPacketCompressed {
+    #[parser(extras = "Extra<Self::Context>")]
+    fn deserialize(input: &[u8]) -> Self {
+        try {
+            let packet_length_varint = VarInt::<i32>::deserialize(input)?;
+            assert!(packet_length_varint.0 >= 0);
+            let packet_length = packet_length_varint.0 as usize;
+            let data_length_varint = VarInt::<i32>::deserialize(input)?;
+            assert!(data_length_varint.0 >= 0);
+            let data_length = data_length_varint.0 as usize;
+            let id: Compress<VarInt<i32>, Zlib> = Compress::decompress(Bytes::copy_from_slice(
+                input.input.slice_from(input.offset..),
+            ))?;
+            let data = Compress::decompress(Bytes::from(
+                take(data_length - id.0.length_of()).parse_with(input)?,
+            ))?;
+            Self {
+                length: packet_length,
+                data_length,
+                id,
+                data,
+            }
+        }
+    }
+}
+
+impl Serialize for SerializedPacketCompressed {
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), Error> {
+        let length = VarInt::<i32>(self.length.try_into().map_err(|_| Error::VarIntTooBig)?);
+        length.serialize_to(buf)?;
+        let data_length = VarInt::<i32>(
+            self.data_length
+                .try_into()
+                .map_err(|_| Error::VarIntTooBig)?,
+        );
+        data_length.serialize_to(buf)?;
+        self.id.serialize_to(buf)?;
+        self.data.serialize_to(buf)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct PluginMessage {
     pub channel: Identifier,
     pub data: Bytes,

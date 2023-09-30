@@ -196,3 +196,34 @@ impl Packet for SetDefaultSpawnPosition {
     const ID: crate::model::VarInt = VarInt(0x50);
     const STATE: crate::model::State = State::Play;
 }
+
+/// This packet tells the client that it should enable support for the feature flags listed in the `feature_flags` field.
+/// Note that adding arbitrary identifiers (instead of the constants under this struct,
+/// like `FEATURE_VANILLA` or `FEATURE_BUNDLE`) to the list may cause the client to explode.
+///
+/// # Info
+/// Packet ID: 0x6b
+/// State: Play
+/// Bound to: Client
+///
+/// # Layout
+/// Total Features: VarInt ;; number of elements in the next array
+/// Feature Flags: Array<Identifier>
+#[derive(Debug, Clone)]
+pub struct FeatureFlags {
+    pub feature_flags: Array<Identifier>,
+}
+
+impl Packet for FeatureFlags {
+    const ID: crate::model::VarInt = VarInt(0x6b);
+    const STATE: crate::model::State = State::Play;
+}
+
+impl_ser!(|PacketContext| FeatureFlags => [feature_flags]);
+
+impl FeatureFlags {
+    /// A feature flag that enables all vanilla features in the notchian client.
+    pub const FEATURE_VANILLA: Identifier = Identifier::new_static(Namespace::Minecraft, "vanilla");
+    /// A feature flag that enables support for bundles in the notchian client.
+    pub const FEATURE_BUNDLE: Identifier = Identifier::new_static(Namespace::Minecraft, "bundle");
+}

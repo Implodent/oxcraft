@@ -32,6 +32,7 @@ pub enum CliCommand {
     Decode(ByteInput),
     Help,
     VarInt(ByteInput),
+    Decompress(ByteInput),
 }
 
 #[derive(Debug, Clone)]
@@ -46,10 +47,11 @@ pub enum Flag {
     Help,
     Decode(ByteInput),
     VarInt(ByteInput),
+    Decompress(ByteInput),
 }
 
 #[derive(Debug)]
-enum FlagName<'a> {
+pub enum FlagName<'a> {
     Short(&'a str),
     Long(&'a str),
 }
@@ -90,7 +92,7 @@ fn byte_input(input: &str) -> ByteInput {
 }
 
 #[parser(extras = Extra)]
-fn flag_list(input: &str) -> Vec<FlagName<'a>> {
+pub fn flag_list(input: &str) -> Vec<FlagName<'a>> {
     if input.offset.saturating_sub(1) >= input.input.len() {
         return Ok(vec![]);
     }
@@ -134,6 +136,11 @@ fn flags(input: &str) -> Vec<Flag> {
 
                         Flag::Decode(byte_input(input)?)
                     }
+                    FlagName::Short("c") | FlagName::Long("decompress") => {
+                        one_of(" =")(input)?;
+
+                        Flag::Decompress(byte_input(input)?)
+                    }
                     FlagName::Short("V") | FlagName::Long("varint") => {
                         one_of(" =")(input)?;
 
@@ -160,6 +167,7 @@ fn flags_handle<'a>(
             Flag::Help => cli.command = CliCommand::Help,
             Flag::Decode(input) => cli.command = CliCommand::Decode(input),
             Flag::VarInt(input) => cli.command = CliCommand::VarInt(input),
+            Flag::Decompress(input) => cli.command = CliCommand::Decompress(input),
         }
     }
     try { flags(input)?.into_iter().for_each(|flag| handle(cli, flag)) }

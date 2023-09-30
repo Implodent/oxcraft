@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 oxcr_protocol.workspace = true
+oxcr_cli.workspace = true
 tokio.workspace = true
 bevy.workspace = true
 tracing.workspace = true

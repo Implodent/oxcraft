@@ -440,6 +440,7 @@ pub trait Syncable {
     fn refc_new<T>(t: T) -> Self::RefC<T>;
     fn refc_from_str(s: &str) -> Self::RefC<str>;
     fn refc_from_slice<T: Clone>(slice: &[T]) -> Self::RefC<[T]>;
+    fn refc_from_array<const N: usize, T>(array: [T; N]) -> Self::RefC<[T]>;
     fn refc_from_iter<T: Clone>(iter: impl IntoIterator<Item = T>) -> Self::RefC<[T]>;
 }
 
@@ -459,6 +460,9 @@ impl Syncable for YesSync {
     fn refc_from_slice<T: Clone>(slice: &[T]) -> Self::RefC<[T]> {
         Arc::from(slice)
     }
+    fn refc_from_array<const N: usize, T>(array: [T; N]) -> Self::RefC<[T]> {
+        Arc::new(array)
+    }
     fn refc_from_iter<T: Clone>(iter: impl IntoIterator<Item = T>) -> Self::RefC<[T]> {
         Arc::from_iter(iter)
     }
@@ -474,6 +478,9 @@ impl Syncable for NoSync {
     }
     fn refc_from_slice<T: Clone>(slice: &[T]) -> Self::RefC<[T]> {
         Rc::from(slice)
+    }
+    fn refc_from_array<const N: usize, T>(array: [T; N]) -> Self::RefC<[T]> {
+        Rc::new(array)
     }
     fn refc_from_iter<T: Clone>(iter: impl IntoIterator<Item = T>) -> Self::RefC<[T]> {
         Rc::from_iter(iter)
@@ -569,18 +576,24 @@ impl Deserialize for Uuid {
 
 #[derive(Debug, Deref, Clone, PartialEq, Eq)]
 #[deref(forward)]
-pub struct Array<T: Clone, Sy: Syncable = YesSync>(Sy::RefC<[T]>);
+pub struct Array<T, Sy: Syncable = YesSync>(Sy::RefC<[T]>);
 
-impl<T: Clone, Sy: Syncable> Array<T, Sy> {
+impl<T, Sy: Syncable> Array<T, Sy> {
     pub fn empty() -> Self {
-        Self(Sy::refc_from_slice(&[]))
+        Self(Sy::refc_from_array([]))
     }
-    pub fn new(slice: &[T]) -> Self {
+    pub fn new_from_array<const N: usize>(array: [T; N]) -> Self {
+        Self(Sy::refc_from_array(array))
+    }
+    pub fn new(slice: &[T]) -> Self
+    where
+        T: Clone,
+    {
         Self(Sy::refc_from_slice(slice))
     }
 }
 
-impl<T: Clone + Serialize, Sy: Syncable> Serialize for Array<T, Sy> {
+impl<T: Serialize, Sy: Syncable> Serialize for Array<T, Sy> {
     fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
         try {
             VarInt::<i32>(self.len().try_into().unwrap()).serialize_to(buf)?;
@@ -669,6 +682,9 @@ impl<Sy: Syncable> Display for Identifier<Sy> {
 impl<Sy: Syncable> Identifier<Sy> {
     pub const MINECRAFT_BRAND: Self = Self(Namespace::Minecraft, MaybeHeap::Ref("brand"));
 
+    pub const fn new_static(namespace: Namespace, value: &'static str) -> Self {
+        Self(namespace, MaybeHeap::Ref(value))
+    }
     pub fn new(namespace: Namespace, value: &str) -> Self {
         Self(namespace, MaybeHeap::Heap(Sy::refc_from_str(value)))
     }
@@ -922,5 +938,86 @@ impl Deserialize for IndexMap<String, Nbt> {
         input: &mut Input<&'a [u8], Extra<Self::Context>>,
     ) -> PResult<&'a [u8], Self, Extra<Self::Context>> {
         Nbt::compound(input)
+    }
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+pub struct Zlib;
+#[derive(Default, Clone, Copy, Debug)]
+pub struct Zstd;
+#[derive(Default, Clone, Copy, Debug)]
+pub struct Gzip;
+pub trait Compression {
+    fn encode(data: Bytes) -> Result<Bytes, crate::error::Error>;
+    fn encode_serialize<T: Serialize>(
+        thing: &T,
+        buf: &mut BytesMut,
+    ) -> Result<(), crate::error::Error>;
+    fn decode(data: Bytes) -> Result<Bytes, crate::error::Error>;
+}
+impl Compression for Zlib {
+    fn encode(data: Bytes) -> Result<Bytes, crate::error::Error> {
+        use std::io::Write;
+        let mut enc = flate2::write::ZlibEncoder::new(
+            BytesMut::new().writer(),
+            flate2::Compression::default(),
+        );
+        enc.write_all(&data);
+        Ok(enc.finish()?.into_inner().freeze())
+    }
+
+    fn encode_serialize<T: Serialize>(
+        thing: &T,
+        buf: &mut BytesMut,
+    ) -> Result<(), crate::error::Error> {
+        use std::io::{self, Write};
+
+        struct WriterMut<'a, B: BufMut>(&'a mut B);
+        impl<'a, B: BufMut> Write for WriterMut<'a, B> {
+            fn write(&mut self, src: &[u8]) -> io::Result<usize> {
+                let n = std::cmp::min(self.0.remaining_mut(), src.len());
+
+                self.0.put(&src[0..n]);
+                Ok(n)
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut enc =
+            flate2::write::ZlibEncoder::new(WriterMut(buf), flate2::Compression::default());
+
+        let mut bmut = BytesMut::new();
+        thing.serialize_to(&mut bmut)?;
+        enc.write_all(&bmut);
+
+        enc.finish();
+
+        Ok(())
+    }
+
+    fn decode(data: Bytes) -> Result<Bytes, crate::error::Error> {
+        use std::io::Read;
+        let mut dec = flate2::read::ZlibDecoder::new(std::io::Cursor::new(data));
+        let mut buf = Vec::new();
+        dec.read_to_end(&mut buf)?;
+        Ok(Bytes::from(buf))
+    }
+}
+#[derive(Debug, Clone, Copy)]
+pub struct Compress<T, C: Compression = Zlib>(pub T, pub C);
+
+impl<T: Serialize, C: Compression> Serialize for Compress<T, C> {
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        C::encode_serialize(&self.0, buf)
+    }
+}
+
+impl<T: Deserialize<Context = ()>, C: Compression + Default> Compress<T, C> {
+    pub fn decompress(buffer: Bytes) -> Result<Self, crate::error::Error> {
+        let buffer = C::decode(buffer)?;
+        Ok(Self(T::deserialize.parse(&buffer)?, C::default()))
     }
 }
