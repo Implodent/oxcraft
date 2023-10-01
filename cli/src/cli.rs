@@ -1,15 +1,16 @@
 //! Spanned-clap, lol
 
 use itertools::Itertools;
-use std::{marker::PhantomData, path::PathBuf, str::FromStr};
+use std::{borrow::Cow, marker::PhantomData, path::PathBuf, str::FromStr};
 
 use aott::prelude::*;
 use oxcr_protocol::{
     aott::{
         self, pfn_type,
-        text::{ascii::ident, digits, inline_whitespace, int, whitespace},
+        text::{ascii::ident, digits, inline_whitespace},
     },
-    bytes::{BufMut, Bytes, BytesMut},
+    bytes::Bytes,
+    nbt::NbtTagType,
     tracing::{level_filters::LevelFilter, Level},
 };
 
@@ -33,6 +34,7 @@ pub enum CliCommand {
     Help,
     VarInt(ByteInput),
     Decompress(ByteInput),
+    Nbt(NbtTagType, ByteInput),
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +50,7 @@ pub enum Flag {
     Decode(ByteInput),
     VarInt(ByteInput),
     Decompress(ByteInput),
+    Nbt(NbtTagType, ByteInput),
 }
 
 #[derive(Debug)]
@@ -147,6 +150,28 @@ fn flags(input: &str) -> Vec<Flag> {
                         Flag::VarInt(byte_input(input)?)
                     }
                     FlagName::Short("h") | FlagName::Long("help") => Flag::Help,
+                    FlagName::Short("n") | FlagName::Long("nbt") => {
+                        one_of(" =")(input)?;
+                        let before_nbt_tag = input.offset;
+
+                        let nbt_tag = match ident(input)? {
+                            "compound" => NbtTagType::Compound,
+                            tag => {
+                                return Err(ParseError::Expected {
+                                    expected: Expectation::AnyOfStr(vec!["compound"]),
+                                    found: tag.chars().next().expect("no tag at all"),
+                                    at: input.span_since(before_nbt_tag).into(),
+                                    help: Some(Cow::Borrowed("an NBT tag type is: Compound")),
+                                })
+                            }
+                        };
+
+                        just(",")(input)?;
+
+                        inline_whitespace().check_with(input)?;
+
+                        Flag::Nbt(nbt_tag, byte_input(input)?)
+                    }
                     FlagName::Short(flag) | FlagName::Long(flag) => Err(ParseError::UnknownFlag {
                         flag: flag.to_owned(),
                         at: input.span_since(before).into(),
@@ -168,6 +193,7 @@ fn flags_handle<'a>(
             Flag::Decode(input) => cli.command = CliCommand::Decode(input),
             Flag::VarInt(input) => cli.command = CliCommand::VarInt(input),
             Flag::Decompress(input) => cli.command = CliCommand::Decompress(input),
+            Flag::Nbt(tag, input) => cli.command = CliCommand::Nbt(tag, input),
         }
     }
     try { flags(input)?.into_iter().for_each(|flag| handle(cli, flag)) }
@@ -177,7 +203,7 @@ fn flags_handle<'a>(
 pub fn yay(input: &str) -> Cli {
     try {
         let mut cli = Cli {
-            level: LevelFilter::OFF,
+            level: LevelFilter::INFO,
             command: CliCommand::Help,
         };
 

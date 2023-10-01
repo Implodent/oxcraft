@@ -64,6 +64,8 @@ pub enum ParseError {
 pub enum Expectation {
     #[error("{}", any_of(.0))]
     AnyOf(Vec<char>),
+    #[error("{}", any_of(.0))]
+    AnyOfStr(Vec<&'static str>),
     #[error("end of input")]
     EndOfInput,
     #[error("a digit with radix {_0}")]

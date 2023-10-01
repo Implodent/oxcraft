@@ -261,7 +261,6 @@ impl NbtTag {
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[doc(hidden)]
 pub enum NbtTagType {
     End = 0,
     Byte,

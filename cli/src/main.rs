@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 #![feature(iterator_try_collect, try_blocks)]
 
 use oxcr_protocol::{
@@ -5,19 +6,20 @@ use oxcr_protocol::{
     bytes::Bytes,
     error::Error,
     logging::CraftLayer,
-    miette::{self, bail, IntoDiagnostic, Report},
+    miette::{bail, IntoDiagnostic, Report},
     model::{
-        packets::{play::LoginPlay, Packet, PacketContext, SerializedPacket},
+        packets::{play::LoginPlay, Packet, SerializedPacket},
         VarInt,
     },
-    ser::{BytesSource, Deserialize, Serialize, WithSource},
+    nbt::Nbt,
+    ser::{BytesSource, Deserialize, WithSource},
     tracing::debug,
 };
 use tracing_subscriber::{
     prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
 
-use crate::cli::{ByteInput, Cli, CliCommand};
+use crate::cli::{ByteInput, CliCommand};
 
 mod cli;
 mod error;
@@ -39,7 +41,7 @@ fn run(_path: String, args: &str) -> Result<(), Report> {
         .with(CraftLayer)
         .set_default();
 
-    debug!("{:?}", cli);
+    debug!(%cli.level, ?cli.command);
 
     match cli.command {
         CliCommand::Help => help(),
@@ -62,7 +64,15 @@ fn run(_path: String, args: &str) -> Result<(), Report> {
                     .map_err(reconcile(bytes))?
             );
         }
-        CliCommand::Decompress(inp) => todo!(),
+        CliCommand::Nbt(tag, inp) => {
+            let bytes = read_byte_input(inp)?;
+            let nbt = Nbt::single
+                .parse_with_context(&bytes, tag)
+                .map_err(reconcile(bytes))?;
+
+            println!("{nbt:#?}");
+        }
+        CliCommand::Decompress(_inp) => todo!(),
     };
 
     Ok(())
@@ -111,16 +121,20 @@ fn main() -> Result<(), Report> {
 fn help() {
     println!(
         r#"
-    This is the OxCraft CLI. Here you can serialize and deserialize packets (currently only LoginPlay).
+This is the OxCraft CLI. Here you can serialize and deserialize packets (currently only LoginPlay) and NBT.
 
-    Example usage:
-    cargo run -p oxcr_cli -- -Dd 0xbd7d9a9f7e
-    This will deserialize turn on debug logging and deserialize LoginPlay from the data 0xbd7d etc.
+Example usage:
+cargo run -p oxcr_cli -- -Dd 0xbd7d9a9f7e
+This will turn on debug logging and deserialize LoginPlay from the data 0xbd7d etc.
 
-    Flags:
-    -l --level <LEVEL> what log level
-    -D --debug same as --level debug
-    -d --deserialize --decode <BINARY/OCTAL/HEX/DECIMAL (0d) DATA> deserializes a packet from <DATA>, then debug-logs it.
+Clarifications:
+<DATA> is either inline binary (0b...), octal (0o...), hexadecimal (0x...), or decimal data (0d...); or it could be a path like ./mydata.bin
+
+Flags:
+-l --level <LEVEL> what log level (error, warn, info, debug, trace)
+-D --debug same as --level debug
+-d --deserialize --decode <DATA> deserializes a packet from <DATA>, then debug-logs it.
+-n --nbt <TAG_TYPE>, <DATA> deserializes a <TAG_TYPE> from <DATA>. <TAG_TYPE> is (right now only) compound
     "#
     );
 }
