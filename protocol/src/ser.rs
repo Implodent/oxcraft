@@ -52,46 +52,46 @@ pub fn any_of<T: Debug>(v: &[T]) -> String {
 }
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
-pub enum SerializationErrorKind<Item: Debug> {
+pub enum SerializationError<Item: Debug> {
     #[error("expected {}, found {found:?}", any_of(.expected))]
     #[diagnostic(code(aott::error::expected), help("invalid inputs encountered - try looking at it more and check if you got something wrong."))]
-    Expected { expected: Vec<Item>, found: Item },
+    Expected {
+        expected: Vec<Item>,
+        found: Item,
+        #[label = "here"]
+        at: SourceSpan,
+    },
     #[error("unexpected end of file")]
     #[diagnostic(
         code(aott::error::unexpected_eof),
         help("there wasn't enough input to deserialize, try giving more next time.")
     )]
-    UnexpectedEof { expected: Option<Vec<Item>> },
-    #[error("expected end of file, found {found:?}")]
+    UnexpectedEof {
+        expected: Option<Vec<Item>>,
+        #[label = "last input was here"]
+        at: SourceSpan,
+    },
+    #[error("expected end of input, found {found:?}")]
     #[diagnostic(
         code(aott::error::expected_eof),
         help("more input was given than expected, try revising your inputs.")
     )]
-    ExpectedEof { found: Item },
+    ExpectedEof {
+        found: Item,
+        #[label = "end of input was expected here"]
+        at: SourceSpan,
+    },
 }
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
-#[error("{kind}")]
-pub struct SerializationError<Item: Debug + 'static> {
-    #[label = "here"]
-    pub span: SourceSpan,
-    #[diagnostic(transparent)]
-    #[source]
-    #[diagnostic_source]
-    pub kind: SerializationErrorKind<Item>,
-}
-
-#[derive(thiserror::Error, miette::Diagnostic, Debug)]
-#[error("{kind}")]
+#[error("{error}")]
 pub struct WithSource<Item: Debug + 'static> {
     #[source_code]
     pub source: BytesSource,
-    #[label = "here"]
-    pub span: SourceSpan,
     #[diagnostic(transparent)]
     #[source]
     #[diagnostic_source]
-    pub kind: SerializationErrorKind<Item>,
+    pub error: SerializationError<Item>,
 }
 
 #[derive(Debug, Clone)]
@@ -225,17 +225,16 @@ impl<'a, C> ParserExtras<&'a [u8]> for Extra<C> {
     type Context = C;
     type Error = crate::error::Error;
 }
+
 impl<'a> Error<&'a [u8]> for crate::error::Error {
     type Span = Range<usize>;
     fn expected_eof_found(
         span: Self::Span,
         found: aott::MaybeRef<'_, <&'a [u8] as InputType>::Token>,
     ) -> Self {
-        Self::Ser(SerializationError {
-            span: span.into(),
-            kind: SerializationErrorKind::ExpectedEof {
-                found: found.into_clone(),
-            },
+        Self::Ser(SerializationError::ExpectedEof {
+            found: found.into_clone(),
+            at: span.into(),
         })
     }
 
@@ -244,12 +243,10 @@ impl<'a> Error<&'a [u8]> for crate::error::Error {
         expected: Vec<<&'a [u8] as InputType>::Token>,
         found: aott::MaybeRef<'_, <&'a [u8] as InputType>::Token>,
     ) -> Self {
-        Self::Ser(SerializationError {
-            span: span.into(),
-            kind: SerializationErrorKind::Expected {
-                expected,
-                found: found.into_clone(),
-            },
+        Self::Ser(SerializationError::Expected {
+            expected,
+            found: found.into_clone(),
+            at: span.into(),
         })
     }
 
@@ -257,9 +254,9 @@ impl<'a> Error<&'a [u8]> for crate::error::Error {
         span: Self::Span,
         expected: Option<Vec<<&'a [u8] as InputType>::Token>>,
     ) -> Self {
-        Self::Ser(SerializationError {
-            span: ((span.start.saturating_sub(1))..span.end).into(),
-            kind: SerializationErrorKind::UnexpectedEof { expected },
+        Self::Ser(SerializationError::UnexpectedEof {
+            at: ((span.start.saturating_sub(1))..span.end).into(),
+            expected,
         })
     }
 }
@@ -275,11 +272,9 @@ impl<'a> Error<&'a str> for crate::error::Error {
         span: Self::Span,
         found: aott::MaybeRef<'_, <&'a str as InputType>::Token>,
     ) -> Self {
-        Self::SerStr(SerializationError {
-            span: span.into(),
-            kind: SerializationErrorKind::ExpectedEof {
-                found: found.into_clone(),
-            },
+        Self::SerStr(SerializationError::ExpectedEof {
+            found: found.into_clone(),
+            at: span.into(),
         })
     }
 
@@ -288,12 +283,10 @@ impl<'a> Error<&'a str> for crate::error::Error {
         expected: Vec<<&'a str as InputType>::Token>,
         found: aott::MaybeRef<'_, <&'a str as InputType>::Token>,
     ) -> Self {
-        Self::SerStr(SerializationError {
-            span: span.into(),
-            kind: SerializationErrorKind::Expected {
-                expected,
-                found: found.into_clone(),
-            },
+        Self::SerStr(SerializationError::Expected {
+            expected,
+            found: found.into_clone(),
+            at: span.into(),
         })
     }
 
@@ -301,9 +294,9 @@ impl<'a> Error<&'a str> for crate::error::Error {
         span: Self::Span,
         expected: Option<Vec<<&'a str as InputType>::Token>>,
     ) -> Self {
-        Self::SerStr(SerializationError {
-            span: ((span.start.saturating_sub(1))..span.end).into(),
-            kind: SerializationErrorKind::UnexpectedEof { expected },
+        Self::SerStr(SerializationError::UnexpectedEof {
+            at: ((span.start.saturating_sub(1))..span.end).into(),
+            expected,
         })
     }
 }
@@ -1019,5 +1012,19 @@ impl<T: Deserialize<Context = ()>, C: Compression + Default> Compress<T, C> {
     pub fn decompress(buffer: Bytes) -> Result<Self, crate::error::Error> {
         let buffer = C::decode(buffer)?;
         Ok(Self(T::deserialize.parse(&buffer)?, C::default()))
+    }
+}
+
+impl<'a, T: Serialize + ?Sized> Serialize for &'a T {
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        (**self).serialize_to(buf)
+    }
+}
+
+impl<T1: Serialize, T2: Serialize> Serialize for (T1, T2) {
+    fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error> {
+        self.0.serialize_to(buf)?;
+        self.1.serialize_to(buf)?;
+        Ok(())
     }
 }

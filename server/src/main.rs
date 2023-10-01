@@ -285,10 +285,13 @@ fn listen(net: Res<NetNet>, rt: Res<TokioTasksRuntime>) {
                     entity
                 })
                 .await;
+
             tokio::spawn(async move {
                 let taske = t;
                 shit_r.recv().await.expect("AAAAAAAAAAAAAAAAAAAAAAAAAA");
+
                 drop(shit_r);
+
                 taske
                     .run_on_main_thread(move |cx| {
                         if !cx.world.despawn(entity) {
@@ -298,6 +301,7 @@ fn listen(net: Res<NetNet>, rt: Res<TokioTasksRuntime>) {
                     .await;
             });
         }
+
         #[allow(unreachable_code)]
         Ok::<(), Error>(())
     });
@@ -365,7 +369,7 @@ fn init_registries(
         ),
     ]);
 
-    info!(dimension_types=?dimension_types.0, worldgen_biomes=?worldgen_biomes.0, "successfully initialized registries.");
+    info!(dimension_types=?dimension_types.0, worldgen_biomes=?worldgen_biomes.0, damage_types=?damage_types.0, "successfully initialized registries.");
 }
 
 #[tokio::main]

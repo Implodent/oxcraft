@@ -86,7 +86,7 @@ impl DimensionType {
         logical_height: 384,
         min_y: -64,
         monster_spawn_block_light_limit: 0,
-        monster_spawn_light_level: MonsterSpawnLightLevel::Range(0..=7),
+        monster_spawn_light_level: MonsterSpawnLightLevel::Level(0),
         natural: true,
         piglin_safe: false,
         respawn_anchor_works: false,

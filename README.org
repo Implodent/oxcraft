@@ -8,7 +8,6 @@ I chose Bevy for the ECS, not because it's better, but because Apecs is dog$hit.
 I chose AOTT for serialization, becuase serde is too much for me and implementing a serializer AND deserializer is just an awful process and I'm lazy.
 
 ** Sources
-
 - [[https://wiki.vg/index.php?title=Protocol&oldid=18375][Where I get protocol documentation]] (1.20.1)
 ** Hacking / building & running from source
 First - clone the repo (~gh repo clone Implodent/oxcraft~ or if you don't have Github's CLI (the ~gh~), ~git clone https://github.com/Implodent/oxcraft.git~) or ~git pull~ (to update the tree)
@@ -22,5 +21,7 @@ Small detail - this server implements the Minecraft protocol version 763 (1.20.1
 ** Configuration
 *** Runtime flags
 You could set the log level as an environment variable ~OXCR_LOG~. The format is the format for the ~tracing-subscriber~'s [[https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives][EnvFilter]].
+If you are a developer and want to inspect the contents of the packets, I recommend you set the variable to ~debug,oxcr_protocol=trace~.
+This sets everything except ~oxcr_protocol~ (the protocol library which ~trace!~'s the packet sending and receiving) to ~DEBUG~, while setting ~oxcr_protocol~ to ~TRACE~.
 *** Build-time flags (~#[cfg(feature = "...")]~'es)
 Right now there are no features. Soon there will be.

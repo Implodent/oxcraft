@@ -4,15 +4,16 @@
 use oxcr_protocol::{
     aott::{self, prelude::Parser},
     bytes::Bytes,
-    error::Error,
     logging::CraftLayer,
     miette::{bail, IntoDiagnostic, Report},
     model::{
-        packets::{play::LoginPlay, Packet, SerializedPacket},
+        packets::{
+            err_with_source, play::LoginPlay, Packet, SerializedPacket, SerializedPacketCompressed,
+        },
         VarInt,
     },
     nbt::Nbt,
-    ser::{BytesSource, Deserialize, WithSource},
+    ser::Deserialize,
     tracing::debug,
 };
 use tracing_subscriber::{
@@ -47,8 +48,13 @@ fn run(_path: String, args: &str) -> Result<(), Report> {
         CliCommand::Help => help(),
         CliCommand::Decode(inp) => {
             let bytes = read_byte_input(inp)?;
-            debug!("{bytes:?}");
-            let spack = SerializedPacket::deserialize.parse(&bytes)?;
+
+            // let spack = SerializedPacket::deserialize.parse(&bytes)?;
+            let spack = SerializedPacket {
+                length: bytes.len() + LoginPlay::ID.length_of(),
+                id: LoginPlay::ID,
+                data: bytes,
+            };
             let deserialized: LoginPlay = spack.try_deserialize(LoginPlay::STATE)?;
 
             println!("{:#?}", deserialized);
@@ -61,34 +67,27 @@ fn run(_path: String, args: &str) -> Result<(), Report> {
                 VarInt::<i64>::deserialize
                     .then_ignore(aott::prelude::end)
                     .parse(&bytes)
-                    .map_err(reconcile(bytes))?
+                    .map_err(err_with_source(|| bytes, Some("varint.bin".to_string())))?
             );
         }
         CliCommand::Nbt(tag, inp) => {
             let bytes = read_byte_input(inp)?;
             let nbt = Nbt::single
                 .parse_with_context(&bytes, tag)
-                .map_err(reconcile(bytes))?;
+                .map_err(err_with_source(|| bytes, Some("nbt.bin".to_string())))?;
 
             println!("{nbt:#?}");
         }
-        CliCommand::Decompress(_inp) => todo!(),
+        CliCommand::Decompress(inp) => {
+            let bytes = read_byte_input(inp)?;
+            println!(
+                "{:#x?}",
+                SerializedPacketCompressed::deserialize.parse(&bytes)?
+            );
+        }
     };
 
     Ok(())
-}
-
-fn reconcile(
-    bytes: Bytes,
-) -> impl FnOnce(oxcr_protocol::error::Error) -> oxcr_protocol::error::Error {
-    move |error| match error {
-        Error::Ser(ser) => Error::SerSrc(WithSource {
-            kind: ser.kind,
-            span: ser.span,
-            source: BytesSource::new(bytes, Some("thing.bin".into())),
-        }),
-        a => a,
-    }
 }
 
 fn read_byte_input(inp: ByteInput) -> Result<Bytes, Report> {

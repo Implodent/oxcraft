@@ -142,8 +142,10 @@ impl PlayerNet {
     pub fn new(mut read: OwnedReadHalf, mut write: OwnedWriteHalf, shit: mpsc::Sender<()>) -> Self {
         let peer_addr = read.peer_addr().expect("no peer address");
         let local_addr = read.local_addr().expect("no local address");
+
         let (s_recv, recv) = flume::unbounded();
         let (send, r_send) = flume::unbounded();
+
         let send_task = tokio::spawn(async move {
             let Err::<!, _>(e) = async {
                 loop {
@@ -215,32 +217,32 @@ impl PlayerNet {
     ) -> Result<T> {
         let tnov = std::any::type_name::<T>();
         if self.recv.is_disconnected() {
-            debug!(packet=tnov, addr=%self.peer_addr, "receiving packet failed - disconnected");
+            trace!(packet=tnov, addr=%self.peer_addr, "receiving packet failed - disconnected");
             return Err(crate::error::Error::ConnectionEnded);
         }
         let packet = self.recv.recv_async().await?;
         let state = *self.state.read().await;
-        debug!(%self.peer_addr, ?packet, ?state, "Received packet");
+        trace!(%self.peer_addr, ?packet, ?state, "Received packet");
         let result = packet.try_deserialize(state);
-        debug!(?result, %self.peer_addr, "Deserialized packet");
+        trace!(?result, %self.peer_addr, "Deserialized packet");
         result
     }
 
     /// Writes a packet.
     pub fn send_packet<T: Packet + Serialize + Debug>(&self, packet: T) -> Result<()> {
         if self.send.is_disconnected() {
-            debug!(?packet, addr=%self.peer_addr, "sending packet failed - disconnected");
+            trace!(?packet, addr=%self.peer_addr, "sending packet failed - disconnected");
             return Err(crate::error::Error::ConnectionEnded);
         }
         let spack = SerializedPacket::new_ref(&packet)?;
-        debug!(?packet, addr=%self.peer_addr, ?spack, "Sending packet");
+        trace!(?packet, addr=%self.peer_addr, ?spack, "Sending packet");
         Ok(self.send.send(spack)?)
     }
 
     /// Sends a plugin message.
     /// Equivalent to `self.send_packet(PluginMessage { channel, data: data.serialize() })`
     pub fn plugin_message<T: Serialize + Debug>(&self, channel: Identifier, data: T) -> Result<()> {
-        debug!(?channel, ?data, %self.peer_addr, "Sending plugin message");
+        trace!(?channel, ?data, %self.peer_addr, "Sending plugin message");
         self.send_packet(PluginMessage {
             channel,
             data: data.serialize()?,
@@ -254,7 +256,7 @@ impl PlayerNet {
     ) -> Result<Result<T, (State, SerializedPacket)>> {
         let packet = self.recv.recv_async().await?;
         let state = *self.state.read().await;
-        debug!(%self.peer_addr, ?packet, ?state, "trying to receive packet");
+        trace!(%self.peer_addr, ?packet, ?state, "trying to receive packet");
 
         match packet.try_deserialize(state) {
             Ok(deserialized) => {

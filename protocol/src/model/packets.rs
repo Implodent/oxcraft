@@ -1,7 +1,10 @@
+use std::ops::Deref;
+
 use crate::error::Error;
 use crate::ser::*;
 use ::bytes::{BufMut, Bytes, BytesMut};
 use aott::prelude::*;
+use tracing::debug;
 
 use super::{State, VarInt};
 
@@ -76,17 +79,10 @@ impl SerializedPacket {
 
         P::deserialize
             .parse_with_context(self.data.as_ref(), context)
-            .map_err(|e| match e {
-                Error::Ser(error) => Error::SerSrc(WithSource {
-                    source: BytesSource::new(
-                        self.data.clone(),
-                        Some(format!("packet_0x{:x}.bin", self.id.0)),
-                    ),
-                    span: error.span,
-                    kind: error.kind,
-                }),
-                e => e,
-            })
+            .map_err(err_with_source(
+                || self.data.clone(),
+                Some(format!("packet_{:#x}.bin", self.id.0)),
+            ))
     }
 }
 
@@ -123,8 +119,8 @@ impl Serialize for SerializedPacket {
 pub struct SerializedPacketCompressed {
     pub length: usize,
     pub data_length: usize,
-    pub id: Compress<super::VarInt, Zlib>,
-    pub data: Compress<Bytes, Zlib>,
+    pub id: super::VarInt,
+    pub data: Bytes,
 }
 
 impl SerializedPacketCompressed {
@@ -142,8 +138,8 @@ impl SerializedPacketCompressed {
             Self {
                 length,
                 data_length,
-                id: Compress(id, Zlib),
-                data: Compress(data, Zlib),
+                id,
+                data,
             }
         }
     }
@@ -152,24 +148,27 @@ impl SerializedPacketCompressed {
         &self,
         state: State,
     ) -> Result<P, Error> {
-        let context = PacketContext {
-            id: self.id.0,
-            state,
-        };
+        let context = PacketContext { id: self.id, state };
 
         P::deserialize
-            .parse_with_context(self.data.0.as_ref(), context)
-            .map_err(|e| match e {
-                Error::Ser(error) => Error::SerSrc(WithSource {
-                    source: BytesSource::new(
-                        self.data.0.clone(),
-                        Some(format!("packet_0x{:x}.bin", self.id.0 .0)),
-                    ),
-                    span: error.span,
-                    kind: error.kind,
-                }),
-                e => e,
-            })
+            .parse_with_context(&self.data, context)
+            .map_err(err_with_source(
+                || self.data.clone(),
+                Some(format!("packet_{:#x}.bin", self.id.0)),
+            ))
+    }
+}
+
+pub fn err_with_source(
+    source: impl FnOnce() -> Bytes,
+    name: Option<String>,
+) -> impl FnOnce(Error) -> Error {
+    move |e| match e {
+        Error::Ser(error) => Error::SerSrc(WithSource {
+            source: BytesSource::new(source(), name),
+            error,
+        }),
+        e => e,
     }
 }
 
@@ -178,22 +177,34 @@ impl Deserialize for SerializedPacketCompressed {
     fn deserialize(input: &[u8]) -> Self {
         try {
             let packet_length_varint = VarInt::<i32>::deserialize(input)?;
-            assert!(packet_length_varint.0 >= 0);
+            assert!(packet_length_varint.0 > 0);
             let packet_length = packet_length_varint.0 as usize;
             let data_length_varint = VarInt::<i32>::deserialize(input)?;
             assert!(data_length_varint.0 >= 0);
             let data_length = data_length_varint.0 as usize;
-            let id: Compress<VarInt<i32>, Zlib> = Compress::decompress(Bytes::copy_from_slice(
-                input.input.slice_from(input.offset..),
-            ))?;
-            let data = Compress::decompress(Bytes::from(
-                take(data_length - id.0.length_of()).parse_with(input)?,
-            ))?;
+            let actual_data_length = packet_length - data_length_varint.length_of();
+            debug!(
+                packet_length,
+                data_length, actual_data_length, "decompressing"
+            );
+            let Compress(real_data, Zlib): Compress<Bytes, Zlib> = Compress::decompress(
+                Bytes::copy_from_slice(input.input.slice_from(input.offset..)),
+            )?;
+            assert_eq!(real_data.len(), data_length);
+            let data_slice = real_data.deref();
+            let mut data_input = Input::new(&data_slice);
+            let id = VarInt::<i32>::deserialize
+                .parse_with(&mut data_input)
+                .map_err(err_with_source(
+                    || real_data.clone(),
+                    Some(format!("packet_compressed_without_id.bin")),
+                ))?;
+            let data = data_input.input.slice_from(data_input.offset..);
             Self {
                 length: packet_length,
                 data_length,
                 id,
-                data,
+                data: Bytes::copy_from_slice(data),
             }
         }
     }
@@ -209,8 +220,7 @@ impl Serialize for SerializedPacketCompressed {
                 .map_err(|_| Error::VarIntTooBig)?,
         );
         data_length.serialize_to(buf)?;
-        self.id.serialize_to(buf)?;
-        self.data.serialize_to(buf)?;
+        Compress((&self.id, &self.data), Zlib).serialize_to(buf)?;
         Ok(())
     }
 }
