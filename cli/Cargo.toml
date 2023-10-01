@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 oxcr_protocol.workspace = true
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+tracing-subscriber.workspace = true
 itertools.workspace = true

@@ -15,6 +15,7 @@
 
 pub mod error;
 pub mod executor;
+pub mod logging;
 pub mod model;
 pub mod nbt;
 pub mod nsfr;
@@ -29,6 +30,7 @@ pub mod serde {
 }
 pub use indexmap;
 pub use miette;
+pub use nu_ansi_term as ansi;
 pub use tracing;
 
 pub async fn rwlock_set<T: 'static>(rwlock: &RwLock<T>, value: T) {

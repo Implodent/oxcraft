@@ -962,7 +962,7 @@ impl Compression for Zlib {
             BytesMut::new().writer(),
             flate2::Compression::default(),
         );
-        enc.write_all(&data);
+        enc.write_all(&data)?;
         Ok(enc.finish()?.into_inner().freeze())
     }
 
@@ -991,9 +991,9 @@ impl Compression for Zlib {
 
         let mut bmut = BytesMut::new();
         thing.serialize_to(&mut bmut)?;
-        enc.write_all(&bmut);
+        enc.write_all(&bmut)?;
 
-        enc.finish();
+        enc.finish()?;
 
         Ok(())
     }

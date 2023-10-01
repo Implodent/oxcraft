@@ -8,6 +8,7 @@ use model::DifficultySetting;
 use oxcr_protocol::{
     executor::{TaskContext, TokioTasksRuntime},
     indexmap::IndexMap,
+    logging::CraftLayer,
     miette::{self, IntoDiagnostic, Report},
     model::{
         chat::{self, *},
@@ -36,7 +37,9 @@ use oxcr_protocol::{
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, sync::mpsc};
 use tracing::instrument;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{
+    prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
+};
 
 use crate::{
     error::Error,
@@ -367,16 +370,24 @@ fn init_registries(
 
 #[tokio::main]
 async fn main() -> Result<(), Report> {
-    tracing_subscriber::fmt()
-        .pretty()
-        .with_env_filter(EnvFilter::from_env("OXCR_LOG"))
+    tracing_subscriber::registry()
+        .with(EnvFilter::from_env("OXCR_LOG"))
+        .with(CraftLayer)
         .init();
 
     miette::set_panic_hook();
 
     let cli = cli::Cli::parse_args()?;
 
-    debug!("{cli:#?}");
+    debug!(?cli);
+
+    trace!(
+        r#"Hello, dude with OXCR_LOG=trace.
+I see you have some intention of getting more info out of this program.
+Please be aware that if you do not turn OXCR_LOG=trace down
+to something like =debug or =info, your log files might explode.
+That was my warning, now I wish you good luck debugging your issue."#
+    );
 
     let tcp = tokio::net::TcpListener::bind(("127.0.0.1", cli.port))
         .await
