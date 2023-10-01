@@ -4,6 +4,7 @@ use oxcr_protocol::{
     aott::{self, prelude::Parser},
     bytes::Bytes,
     error::Error,
+    logging::CraftLayer,
     miette::{self, bail, IntoDiagnostic, Report},
     model::{
         packets::{play::LoginPlay, Packet, PacketContext, SerializedPacket},
@@ -12,7 +13,9 @@ use oxcr_protocol::{
     ser::{BytesSource, Deserialize, Serialize, WithSource},
     tracing::debug,
 };
-use tracing_subscriber::{util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{
+    prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
+};
 
 use crate::cli::{ByteInput, Cli, CliCommand};
 
@@ -20,10 +23,9 @@ mod cli;
 mod error;
 
 fn run(_path: String, args: &str) -> Result<(), Report> {
-    let tracing_set_default_level = tracing_subscriber::fmt()
-        .pretty()
-        .with_env_filter(EnvFilter::from_env("OXCR_LOG"))
-        .finish()
+    let tracing_set_default_level = tracing_subscriber::registry()
+        .with(EnvFilter::from_env("OXCR_LOG"))
+        .with(CraftLayer)
         .set_default();
 
     let cli = cli::yay
@@ -32,9 +34,9 @@ fn run(_path: String, args: &str) -> Result<(), Report> {
 
     drop(tracing_set_default_level);
 
-    let _tracing_set_real_level = tracing_subscriber::fmt()
-        .with_env_filter(cli.level.to_string())
-        .pretty()
+    let _tracing_set_real_level = tracing_subscriber::registry()
+        .with(EnvFilter::new(cli.level.to_string()))
+        .with(CraftLayer)
         .set_default();
 
     debug!("{:?}", cli);

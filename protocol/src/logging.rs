@@ -1,3 +1,4 @@
+#![allow(unstable_name_collisions)]
 use std::collections::HashMap;
 
 use itertools::Itertools;
