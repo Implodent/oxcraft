@@ -21,7 +21,7 @@ use crate::model::VarInt;
 use ::bytes::{BufMut, Bytes, BytesMut};
 pub use aott::prelude::parser;
 pub use aott::prelude::Parser;
-use aott::{pfn_type, prelude::*};
+use aott::{pfn_type, prelude::*, text::CharError};
 use tracing::debug;
 
 pub trait Deserialize: Sized {
@@ -44,16 +44,16 @@ pub trait Serialize {
     fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), crate::error::Error>;
 }
 
-pub fn any_of<T: Debug>(v: &[T]) -> String {
-    match v {
+pub fn any_of<T: Debug>(things: &[T]) -> String {
+    match things {
         [el] => format!("{el:?}"),
         elements => format!("any of {elements:?}"),
     }
 }
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
-pub enum SerializationError<Item: Debug> {
-    #[error("expected {}, found {found:?}", any_of(.expected))]
+pub enum SerializationError<Item: Debug + Display> {
+    #[error("expected {}, found {found}", any_of(.expected))]
     #[diagnostic(code(aott::error::expected), help("invalid inputs encountered - try looking at it more and check if you got something wrong."))]
     Expected {
         expected: Vec<Item>,
@@ -71,7 +71,7 @@ pub enum SerializationError<Item: Debug> {
         #[label = "last input was here"]
         at: SourceSpan,
     },
-    #[error("expected end of input, found {found:?}")]
+    #[error("expected end of input, found {found}")]
     #[diagnostic(
         code(aott::error::expected_eof),
         help("more input was given than expected, try revising your inputs.")
@@ -81,11 +81,41 @@ pub enum SerializationError<Item: Debug> {
         #[label = "end of input was expected here"]
         at: SourceSpan,
     },
+    #[error("filter failed in {location}, while checking {token}")]
+    #[diagnostic(code(aott::error::filter_failed))]
+    FilterFailed {
+        #[label = "this is the token that didn't pass"]
+        at: SourceSpan,
+        location: &'static core::panic::Location<'static>,
+        token: Item,
+    },
+    #[error("expected keyword {keyword}")]
+    #[diagnostic(code(aott::text::error::expected_keyword))]
+    ExpectedKeyword {
+        #[label = "the keyword here is {found}"]
+        at: SourceSpan,
+        keyword: String,
+        found: String,
+    },
+    #[error("expected digit of radix {radix}, found {found}")]
+    #[diagnostic(code(aott::text::error::expected_digit))]
+    ExpectedDigit {
+        #[label = "here"]
+        at: SourceSpan,
+        radix: u32,
+        found: char,
+    },
+    #[error("expected identifier character (a-zA-Z or _), but found {found}")]
+    ExpectedIdent {
+        #[label = "here"]
+        at: SourceSpan,
+        found: char,
+    },
 }
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
 #[error("{error}")]
-pub struct WithSource<Item: Debug + 'static> {
+pub struct WithSource<Item: Debug + Display + 'static> {
     #[source_code]
     pub source: BytesSource,
     #[diagnostic(transparent)]
@@ -227,36 +257,44 @@ impl<'a, C> ParserExtras<&'a [u8]> for Extra<C> {
 }
 
 impl<'a> Error<&'a [u8]> for crate::error::Error {
-    type Span = Range<usize>;
-    fn expected_eof_found(
-        span: Self::Span,
-        found: aott::MaybeRef<'_, <&'a [u8] as InputType>::Token>,
-    ) -> Self {
+    fn expected_eof_found(span: Range<usize>, found: <&'a [u8] as InputType>::Token) -> Self {
         Self::Ser(SerializationError::ExpectedEof {
-            found: found.into_clone(),
+            found,
             at: span.into(),
         })
     }
 
     fn expected_token_found(
-        span: Self::Span,
+        span: Range<usize>,
         expected: Vec<<&'a [u8] as InputType>::Token>,
-        found: aott::MaybeRef<'_, <&'a [u8] as InputType>::Token>,
+        found: <&'a [u8] as InputType>::Token,
     ) -> Self {
         Self::Ser(SerializationError::Expected {
             expected,
-            found: found.into_clone(),
+            found,
             at: span.into(),
         })
     }
 
     fn unexpected_eof(
-        span: Self::Span,
+        span: Range<usize>,
         expected: Option<Vec<<&'a [u8] as InputType>::Token>>,
     ) -> Self {
         Self::Ser(SerializationError::UnexpectedEof {
             at: ((span.start.saturating_sub(1))..span.end).into(),
             expected,
+        })
+    }
+
+    fn filter_failed(
+        span: Range<usize>,
+        location: &'static core::panic::Location<'static>,
+        token: <&'a [u8] as InputType>::Token,
+    ) -> Self {
+        Self::Ser(SerializationError::FilterFailed {
+            at: span.into(),
+            location,
+            token,
         })
     }
 }
@@ -267,36 +305,73 @@ impl<'a, C> ParserExtras<&'a str> for Extra<C> {
 }
 
 impl<'a> Error<&'a str> for crate::error::Error {
-    type Span = Range<usize>;
-    fn expected_eof_found(
-        span: Self::Span,
-        found: aott::MaybeRef<'_, <&'a str as InputType>::Token>,
-    ) -> Self {
+    fn expected_eof_found(span: Range<usize>, found: <&'a str as InputType>::Token) -> Self {
         Self::SerStr(SerializationError::ExpectedEof {
-            found: found.into_clone(),
+            found,
             at: span.into(),
         })
     }
 
     fn expected_token_found(
-        span: Self::Span,
+        span: Range<usize>,
         expected: Vec<<&'a str as InputType>::Token>,
-        found: aott::MaybeRef<'_, <&'a str as InputType>::Token>,
+        found: <&'a str as InputType>::Token,
     ) -> Self {
         Self::SerStr(SerializationError::Expected {
             expected,
-            found: found.into_clone(),
+            found,
             at: span.into(),
         })
     }
 
     fn unexpected_eof(
-        span: Self::Span,
+        span: Range<usize>,
         expected: Option<Vec<<&'a str as InputType>::Token>>,
     ) -> Self {
         Self::SerStr(SerializationError::UnexpectedEof {
             at: ((span.start.saturating_sub(1))..span.end).into(),
             expected,
+        })
+    }
+
+    fn filter_failed(
+        span: Range<usize>,
+        location: &'static core::panic::Location<'static>,
+        token: <&'a str as InputType>::Token,
+    ) -> Self {
+        Self::SerStr(SerializationError::FilterFailed {
+            at: span.into(),
+            location,
+            token,
+        })
+    }
+}
+
+impl CharError<char> for crate::error::Error {
+    fn expected_digit(span: Range<usize>, radix: u32, got: char) -> Self {
+        Self::SerStr(SerializationError::ExpectedDigit {
+            at: span.into(),
+            radix,
+            found: got,
+        })
+    }
+
+    fn expected_ident_char(span: Range<usize>, got: char) -> Self {
+        Self::SerStr(SerializationError::ExpectedIdent {
+            at: span.into(),
+            found: got,
+        })
+    }
+
+    fn expected_keyword<'a, 'b: 'a>(
+        span: Range<usize>,
+        keyword: &'b <char as text::Char>::Str,
+        actual: &'a <char as text::Char>::Str,
+    ) -> Self {
+        Self::SerStr(SerializationError::ExpectedKeyword {
+            at: span.into(),
+            keyword: keyword.to_owned(),
+            found: actual.to_owned(),
         })
     }
 }
@@ -313,6 +388,7 @@ pub fn deser<T: Deserialize<Context = C>, C>(input: &[u8]) -> T {
     T::deserialize(input)
 }
 
+#[track_caller]
 pub fn no_context<
     I: InputType,
     O,
@@ -323,6 +399,7 @@ pub fn no_context<
 >(
     parser: P,
 ) -> pfn_type!(I, O, EE) {
+    #[track_caller]
     move |input| {
         let mut inp = Input {
             offset: input.offset,
@@ -334,6 +411,8 @@ pub fn no_context<
         Ok(value)
     }
 }
+
+#[track_caller]
 pub fn with_context<
     I: InputType,
     O,
@@ -346,6 +425,7 @@ pub fn with_context<
     parser: P,
     context: C2,
 ) -> pfn_type!(I, O, EE) {
+    #[track_caller]
     move |input| {
         let mut inp = Input {
             offset: input.offset,
@@ -757,6 +837,7 @@ macro_rules! number_impl {
                 impl Deserialize
                         for Number<$num, Big>
                 {
+                        #[track_caller]
                         fn deserialize<'a>(input: &mut Input<&'a [u8], Extra<()>>) -> PResult<&'a [u8], Self, Extra<()>>
                         where
                                 Self: Sized,
@@ -787,6 +868,7 @@ macro_rules! number_impl {
                         }
                 }
                 impl Deserialize for $num {
+                    #[track_caller]
                     fn deserialize<'a>(input: &mut Input<&'a [u8], Extra<()>>) -> PResult<&'a [u8], Self, Extra<()>>
                     where
                             Self: Sized,
@@ -820,6 +902,7 @@ impl Serialize for bool {
 
 impl Deserialize for bool {
     #[parser(extras = "Extra<Self::Context>")]
+    #[track_caller]
     fn deserialize(input: &[u8]) -> Self {
         Ok(one_of([0x0, 0x1])(input)? == 0x1)
     }
@@ -911,6 +994,7 @@ impl Serialize for Bytes {
 }
 
 impl Deserialize for Bytes {
+    #[track_caller]
     fn deserialize<'a>(
         input: &mut Input<&'a [u8], Extra<Self::Context>>,
     ) -> PResult<&'a [u8], Self, Extra<Self::Context>> {

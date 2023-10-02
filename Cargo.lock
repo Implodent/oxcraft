@@ -59,7 +59,7 @@ checksum = "5ecc8056bf6ab9892dcd53216c83d1597487d7dacac16c8df6b877d127df9937"
 [[package]]
 name = "aott"
 version = "0.3.0"
-source = "git+https://github.com/Implodent/AOTT.git#db23351b73161b86dddb2592dee615f2d3b3d8fc"
+source = "git+https://github.com/Implodent/AOTT.git#d04ff6a3db3dfa161dbfc551819fa7b61a5352d0"
 dependencies = [
  "aott_derive",
  "derive_more",
@@ -71,7 +71,7 @@ dependencies = [
 [[package]]
 name = "aott_derive"
 version = "0.3.0"
-source = "git+https://github.com/Implodent/AOTT.git#db23351b73161b86dddb2592dee615f2d3b3d8fc"
+source = "git+https://github.com/Implodent/AOTT.git#d04ff6a3db3dfa161dbfc551819fa7b61a5352d0"
 dependencies = [
  "proc-macro2",
  "quote",
