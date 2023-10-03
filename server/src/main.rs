@@ -276,7 +276,11 @@ fn listen(net: Res<NetNet>, rt: Res<TokioTasksRuntime>) {
             let (read, write) = tcp.into_split();
             let (shit, mut shit_r) = mpsc::channel(1);
 
-            let player = PlayerNet::new(read, write, shit.clone());
+            let CompressionThreshold(compress) = t
+                .run_on_main_thread(|tcx| *tcx.world.resource::<CompressionThreshold>())
+                .await;
+
+            let player = PlayerNet::new(read, write, shit.clone(), compress);
             let entity = t
                 .clone()
                 .run_on_main_thread(move |cx| {
@@ -372,6 +376,9 @@ fn init_registries(
     info!(dimension_types=?dimension_types.0, worldgen_biomes=?worldgen_biomes.0, damage_types=?damage_types.0, "successfully initialized registries.");
 }
 
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct CompressionThreshold(pub Option<usize>);
+
 #[tokio::main]
 async fn main() -> Result<(), Report> {
     tracing_subscriber::registry()
@@ -410,6 +417,7 @@ That was my warning, now I wish you good luck debugging your issue."#
         .init_resource::<Registry<DimensionType>>()
         .init_resource::<Registry<WorldgenBiome>>()
         .init_resource::<Registry<DamageType>>()
+        .insert_resource(CompressionThreshold(None))
         .add_systems(Startup, (init_registries, listen))
         .add_systems(Update, on_login)
         .run();

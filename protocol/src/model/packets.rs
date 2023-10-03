@@ -165,8 +165,8 @@ pub fn err_with_source(
 ) -> impl FnOnce(Error) -> Error {
     move |e| match e {
         Error::Ser(error) => Error::SerSrc(WithSource {
-            source: BytesSource::new(source(), name),
-            error,
+            src: BytesSource::new(source(), name),
+            errors: vec![error],
         }),
         e => e,
     }

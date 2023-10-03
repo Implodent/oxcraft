@@ -140,7 +140,12 @@ unsafe impl Send for PlayerNet {}
 unsafe impl Sync for PlayerNet {}
 
 impl PlayerNet {
-    pub fn new(mut read: OwnedReadHalf, mut write: OwnedWriteHalf, shit: mpsc::Sender<()>) -> Self {
+    pub fn new(
+        mut read: OwnedReadHalf,
+        mut write: OwnedWriteHalf,
+        shit: mpsc::Sender<()>,
+        compression: Option<usize>,
+    ) -> Self {
         let peer_addr = read.peer_addr().expect("no peer address");
         let local_addr = read.local_addr().expect("no local address");
 

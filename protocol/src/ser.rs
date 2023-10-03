@@ -51,6 +51,20 @@ pub fn any_of<T: Debug>(things: &[T]) -> String {
     }
 }
 
+pub fn any_of_display<T: Display>(things: &[T]) -> String {
+    match things {
+        [el] => format!("{el}"),
+        elements => format!(
+            "any of [{}]",
+            elements
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<String>>()
+                .join(", ")
+        ),
+    }
+}
+
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
 pub enum SerializationError<Item: Debug + Display> {
     #[error("expected {}, found {found}", any_of(.expected))]
@@ -114,14 +128,12 @@ pub enum SerializationError<Item: Debug + Display> {
 }
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
-#[error("{error}")]
+#[error("{}", any_of_display(.errors))]
 pub struct WithSource<Item: Debug + Display + 'static> {
     #[source_code]
-    pub source: BytesSource,
-    #[diagnostic(transparent)]
-    #[source]
-    #[diagnostic_source]
-    pub error: SerializationError<Item>,
+    pub src: BytesSource,
+    #[related]
+    pub errors: Vec<SerializationError<Item>>,
 }
 
 #[derive(Debug, Clone)]
