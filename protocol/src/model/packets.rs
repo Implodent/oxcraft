@@ -86,8 +86,10 @@ impl SerializedPacket {
     }
 
     pub fn serialize_compressing(&self, compression: Option<usize>) -> Result<Bytes, Error> {
-        if compression.filter(|x| self.length >= *x).is_some() {
-            let data_length = self.id.length_of() + self.data.len();
+        if let Some(cmp) = compression {
+            let data_length = (self.length >= cmp)
+                .then(|| self.id.length_of() + self.data.len())
+                .unwrap_or(0);
             let datalength = VarInt::<i32>(data_length.try_into().unwrap());
             let length =
                 datalength.length_of() + Compress((&self.id, &self.data), Zlib).serialize()?.len();
@@ -225,12 +227,18 @@ impl Deserialize for SerializedPacketCompressed {
             assert!(data_length_varint.0 >= 0);
             let data_length = data_length_varint.0 as usize;
             let actual_data_length = packet_length - data_length_varint.length_of();
-            debug!(
+            trace!(
                 packet_length,
-                data_length, actual_data_length, "decompressing"
+                data_length,
+                actual_data_length,
+                "decompressing serializedpacket"
             );
-            let Compress(real_data, Zlib): Compress<Bytes, Zlib> =
-                Compress::decompress(input.input.slice_from(input.offset..))?;
+            let data_maybe = input.input.slice_from(input.offset..);
+            let real_data = if data_length > 0 {
+                Zlib::decode(data_maybe)?
+            } else {
+                Bytes::copy_from_slice(data_maybe)
+            };
             assert_eq!(real_data.len(), data_length);
             let data_slice = real_data.deref();
             let mut data_input = Input::new(&data_slice);
@@ -245,7 +253,7 @@ impl Deserialize for SerializedPacketCompressed {
                 length: packet_length,
                 data_length,
                 id,
-                data: Zlib::decode(data)?,
+                data,
             }
         }
     }
