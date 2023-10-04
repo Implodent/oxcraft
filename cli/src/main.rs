@@ -46,6 +46,7 @@ fn run(_path: String, args: &str) -> Result<(), Report> {
 
     match cli.command {
         CliCommand::Help => help(),
+
         CliCommand::Decode(inp) => {
             let bytes = read_byte_input(inp)?;
 
@@ -59,6 +60,7 @@ fn run(_path: String, args: &str) -> Result<(), Report> {
 
             println!("{:#?}", deserialized);
         }
+
         CliCommand::VarInt(inp) => {
             let bytes = read_byte_input(inp)?;
 
@@ -70,6 +72,7 @@ fn run(_path: String, args: &str) -> Result<(), Report> {
                     .map_err(err_with_source(|| bytes, Some("varint.bin".to_string())))?
             );
         }
+
         CliCommand::Nbt(tag, inp) => {
             let bytes = read_byte_input(inp)?;
             let nbt = Nbt::single
@@ -78,8 +81,10 @@ fn run(_path: String, args: &str) -> Result<(), Report> {
 
             println!("{nbt:#?}");
         }
+
         CliCommand::Decompress(inp) => {
             let bytes = read_byte_input(inp)?;
+
             println!(
                 "{:#x?}",
                 SerializedPacketCompressed::deserialize.parse(&bytes)?
