@@ -3,8 +3,8 @@ use std::ops::Deref;
 use crate::error::Error;
 use crate::ser::*;
 use ::bytes::{BufMut, Bytes, BytesMut};
-use aott::prelude::*;
-use tracing::debug;
+use aott::{pfn_type, prelude::*};
+use tracing::{debug, warn};
 
 use super::{State, VarInt};
 
@@ -83,6 +83,48 @@ impl SerializedPacket {
                 || self.data.clone(),
                 Some(format!("packet_{:#x}.bin", self.id.0)),
             ))
+    }
+
+    pub fn serialize_compressing(&self, compression: Option<usize>) -> Result<Bytes, Error> {
+        if compression.filter(|x| self.length >= *x).is_some() {
+            let data_length = self.id.length_of() + self.data.len();
+            let datalength = VarInt::<i32>(data_length.try_into().unwrap());
+            let length =
+                datalength.length_of() + Compress((&self.id, &self.data), Zlib).serialize()?.len();
+            let pack = SerializedPacketCompressed {
+                length,
+                data_length,
+                id: self.id,
+                data: self.data.clone(),
+            };
+            pack.serialize()
+        } else {
+            self.serialize()
+        }
+    }
+
+    pub fn deserialize_compressing<'a>(
+        compression: Option<usize>,
+    ) -> pfn_type!(&'a [u8], Self, Extra<<Self as Deserialize>::Context>) {
+        move |input| {
+            if let Some(cmp) = compression {
+                SerializedPacketCompressed::deserialize(input)
+                    .map(Self::from)
+                    .map(|v| {
+                        if v.length < cmp {
+                            warn!(
+                                packet_length = v.length,
+                                compresssion_threshold = cmp,
+                                "Packet length was less than compression threshold"
+                            );
+                        }
+
+                        v
+                    })
+            } else {
+                Self::deserialize(input)
+            }
+        }
     }
 }
 
@@ -187,9 +229,8 @@ impl Deserialize for SerializedPacketCompressed {
                 packet_length,
                 data_length, actual_data_length, "decompressing"
             );
-            let Compress(real_data, Zlib): Compress<Bytes, Zlib> = Compress::decompress(
-                Bytes::copy_from_slice(input.input.slice_from(input.offset..)),
-            )?;
+            let Compress(real_data, Zlib): Compress<Bytes, Zlib> =
+                Compress::decompress(input.input.slice_from(input.offset..))?;
             assert_eq!(real_data.len(), data_length);
             let data_slice = real_data.deref();
             let mut data_input = Input::new(&data_slice);
@@ -204,7 +245,7 @@ impl Deserialize for SerializedPacketCompressed {
                 length: packet_length,
                 data_length,
                 id,
-                data: Bytes::copy_from_slice(data),
+                data: Zlib::decode(data)?,
             }
         }
     }
@@ -222,6 +263,16 @@ impl Serialize for SerializedPacketCompressed {
         data_length.serialize_to(buf)?;
         Compress((&self.id, &self.data), Zlib).serialize_to(buf)?;
         Ok(())
+    }
+}
+
+impl From<SerializedPacketCompressed> for SerializedPacket {
+    fn from(value: SerializedPacketCompressed) -> Self {
+        Self {
+            length: value.data_length,
+            id: value.id,
+            data: value.data,
+        }
     }
 }
 

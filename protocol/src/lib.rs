@@ -128,7 +128,7 @@ pub struct PlayerNet {
     pub peer_addr: SocketAddr,
     pub local_addr: SocketAddr,
     pub state: RwLock<State>,
-    pub compression: RwLock<Option<usize>>,
+    pub compression: Option<usize>,
     pub _explode: mpsc::Sender<()>,
 }
 
@@ -156,7 +156,7 @@ impl PlayerNet {
             let Err::<!, _>(e) = async {
                 loop {
                     let packet: SerializedPacket = r_send.recv_async().await?;
-                    let data = packet.serialize()?;
+                    let data = packet.serialize_compressing(compression)?;
                     write.write_all(&data).await?;
                 }
             }
@@ -176,7 +176,8 @@ impl PlayerNet {
                     if read_bytes == 0 {
                         return Ok::<(), crate::error::Error>(());
                     }
-                    let spack = SerializedPacket::deserialize.parse(buf.as_ref())?;
+                    let spack = SerializedPacket::deserialize_compressing(compression)
+                        .parse(buf.as_ref())?;
                     s_recv.send_async(spack).await?;
                     buf.clear();
                 }
@@ -212,7 +213,7 @@ impl PlayerNet {
             peer_addr,
             local_addr,
             state: RwLock::new(State::Handshaking),
-            compression: RwLock::new(None),
+            compression,
             _explode: shit,
         }
     }
