@@ -253,7 +253,7 @@ impl Deserialize for SerializedPacketCompressed {
                 length: packet_length,
                 data_length,
                 id,
-                data,
+                data: Bytes::copy_from_slice(data),
             }
         }
     }
