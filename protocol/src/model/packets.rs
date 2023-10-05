@@ -4,7 +4,7 @@ use crate::error::Error;
 use crate::ser::*;
 use ::bytes::{BufMut, Bytes, BytesMut};
 use aott::{pfn_type, prelude::*};
-use tracing::{debug, warn};
+use tracing::{trace, warn};
 
 use super::{State, VarInt};
 
