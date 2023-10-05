@@ -1042,7 +1042,7 @@ pub trait Compression {
         thing: &T,
         buf: &mut BytesMut,
     ) -> Result<(), crate::error::Error>;
-    fn decode(data: Bytes) -> Result<Bytes, crate::error::Error>;
+    fn decode(data: &[u8]) -> Result<Bytes, crate::error::Error>;
 }
 impl Compression for Zlib {
     fn encode(data: Bytes) -> Result<Bytes, crate::error::Error> {
@@ -1087,7 +1087,7 @@ impl Compression for Zlib {
         Ok(())
     }
 
-    fn decode(data: Bytes) -> Result<Bytes, crate::error::Error> {
+    fn decode(data: &[u8]) -> Result<Bytes, crate::error::Error> {
         use std::io::Read;
         let mut dec = flate2::read::ZlibDecoder::new(std::io::Cursor::new(data));
         let mut buf = Vec::new();
@@ -1105,7 +1105,7 @@ impl<T: Serialize, C: Compression> Serialize for Compress<T, C> {
 }
 
 impl<T: Deserialize<Context = ()>, C: Compression + Default> Compress<T, C> {
-    pub fn decompress(buffer: Bytes) -> Result<Self, crate::error::Error> {
+    pub fn decompress(buffer: &[u8]) -> Result<Self, crate::error::Error> {
         let buffer = C::decode(buffer)?;
         Ok(Self(T::deserialize.parse(&buffer)?, C::default()))
     }
