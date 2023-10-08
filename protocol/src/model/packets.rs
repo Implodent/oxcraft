@@ -233,13 +233,15 @@ impl Deserialize for SerializedPacketCompressed {
                 actual_data_length,
                 "decompressing serializedpacket"
             );
-            let data_maybe = input.input.slice_from(input.offset..);
-            let real_data = if data_length > 0 {
+            let data_maybe = input
+                .input
+                .slice(input.offset..(input.offset + actual_data_length));
+            let real_data = if data_length <= 0 {
+                Bytes::copy_from_slice(data_maybe)
+            } else {
                 let real_data = Zlib::decode(data_maybe)?;
                 assert_eq!(real_data.len(), data_length);
                 real_data
-            } else {
-                Bytes::copy_from_slice(data_maybe)
             };
             let data_slice = real_data.deref();
             let mut data_input = Input::new(&data_slice);

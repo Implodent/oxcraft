@@ -349,14 +349,14 @@ fn on_login(rt: Res<TokioTasksRuntime>, mut ev: EventReader<PlayerLoginEvent>, q
                                 }),
                                 _ => Ok(()),
                             };
-                            player.cancellator.cancel();
                             Ok(())
                         }
                     }
                 },
                 () = player.cancellator.cancelled() => {
                     error!("connection terminated");
-                    Ok(()) }
+                    Ok(())
+                }
             }
         });
     }
