@@ -94,6 +94,7 @@ impl SerializedPacket {
                     Zlib::encode(&self.data)?.len() + VarInt(maybe_data_length as i32).length_of(),
                 )
             } else {
+                trace!("packet was smaller than threshold {cmp}, sending uncompressed");
                 (0, self.length)
             };
             let pack = SerializedPacketCompressed {
@@ -270,7 +271,11 @@ impl Serialize for SerializedPacketCompressed {
                 .map_err(|_| Error::VarIntTooBig)?,
         );
         data_length.serialize_to(buf)?;
-        Compress((&self.id, &self.data), Zlib).serialize_to(buf)?;
+        if self.data_length > 0 {
+            Compress((&self.id, &self.data), Zlib).serialize_to(buf)?
+        } else {
+            (&self.id, &self.data).serialize_to(buf)?
+        }
         Ok(())
     }
 }

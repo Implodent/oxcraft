@@ -131,7 +131,10 @@ use std::{
     fmt::Debug,
     net::SocketAddr,
     ops::{Deref, DerefMut},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -156,13 +159,13 @@ use crate::{
 
 #[derive(Debug)]
 pub struct PlayerNet {
-    pub send: flume::Sender<SerializedPacket>,
+    pub send: flume::Sender<(bool, SerializedPacket)>,
     pub recv: flume::Receiver<SerializedPacket>,
     pub peer_addr: SocketAddr,
     pub local_addr: SocketAddr,
     pub state: RwLock<State>,
     pub compression: Option<usize>,
-    pub compressing: Arc<RwLock<bool>>,
+    pub compressing: Arc<AtomicBool>,
     pub cancellator: CancellationToken,
 }
 
@@ -186,14 +189,13 @@ impl PlayerNet {
         let (s_recv, recv) = flume::unbounded();
         let (send, r_send) = flume::unbounded();
 
-        let compressing = Arc::new(RwLock::new(false));
+        let compressing = Arc::new(AtomicBool::new(false));
 
         let compressing_ = compressing.clone();
         let send_task = tokio::spawn(async move {
             let Err::<!, _>(e) = async {
                 loop {
-                    let packet: SerializedPacket = r_send.recv_async().await?;
-                    let compres = compressing_.get_copy().await;
+                    let (compres, packet): (bool, SerializedPacket) = r_send.recv_async().await?;
                     let data = if compression.is_some_and(|_| compres) {
                         trace!("[send]compressing");
                         packet.serialize_compressing(compression)?
@@ -220,7 +222,7 @@ impl PlayerNet {
                 loop {
                     let bufslice = &buf[..];
                     let mut input = Input::new(&bufslice);
-                    if let Some(packet) = match if compressing__.get_copy().await {
+                    if let Some(packet) = match if compressing__.load(Ordering::SeqCst) {
                         SerializedPacketCompressed::deserialize
                             .parse_with(&mut input)
                             .map(SerializedPacket::from)
@@ -305,24 +307,32 @@ impl PlayerNet {
     }
 
     /// Writes a packet.
-    pub fn send_packet<T: Packet + Serialize + Debug>(&self, packet: T) -> Result<()> {
+    pub async fn send_packet<T: Packet + Serialize + Debug>(&self, packet: T) -> Result<()> {
         if self.send.is_disconnected() {
             trace!(?packet, addr=%self.peer_addr, "sending packet failed - disconnected");
             return Err(crate::error::Error::ConnectionEnded);
         }
         let spack = SerializedPacket::new_ref(&packet)?;
         trace!(?packet, addr=%self.peer_addr, ?spack, "Sending packet");
-        Ok(self.send.send(spack)?)
+        Ok(self
+            .send
+            .send_async((self.compressing.load(Ordering::SeqCst), spack))
+            .await?)
     }
 
     /// Sends a plugin message.
     /// Equivalent to `self.send_packet(PluginMessage { channel, data: data.serialize() })`
-    pub fn plugin_message<T: Serialize + Debug>(&self, channel: Identifier, data: T) -> Result<()> {
+    pub async fn plugin_message<T: Serialize + Debug>(
+        &self,
+        channel: Identifier,
+        data: T,
+    ) -> Result<()> {
         trace!(?channel, ?data, %self.peer_addr, "Sending plugin message");
         self.send_packet(PluginMessage {
             channel,
             data: data.serialize()?,
         })
+        .await
     }
 
     /// Receives a packet and tries to deserialize it.

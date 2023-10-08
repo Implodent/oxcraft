@@ -208,10 +208,10 @@ impl TaskContext {
         let (output_tx, output_rx) = tokio::sync::oneshot::channel();
         if self.update_run_tx.send(Box::new(move |ctx| {
             if output_tx.send(runnable(ctx)).is_err() {
-                panic!("Failed to sent output from operation run on main thread back to waiting task");
+                tracing::error!("Failed to sent output from operation run on main thread back to waiting task");
             }
         })).is_err() {
-            panic!("Failed to send operation to be run on main thread");
+            tracing::error!("Failed to send operation to be run on main thread");
         }
         output_rx
             .await

@@ -28,7 +28,10 @@ pub enum Error {
     InvalidPacketId(i32),
     #[error("Packet send error: {_0:?}")]
     #[diagnostic(code(flume::error::send))]
-    Send(#[from] flume::SendError<SerializedPacket>),
+    Send(#[from] flume::SendError<(bool, SerializedPacket)>),
+    #[error("Packet send error: {_0:?}")]
+    #[diagnostic(code(flume::error::send))]
+    SendSingle(#[from] flume::SendError<SerializedPacket>),
     #[error("Packet receive error: {_0:?}")]
     #[diagnostic(code(flume::error::recv))]
     Recv(#[from] flume::RecvError),

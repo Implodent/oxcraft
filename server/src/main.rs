@@ -33,7 +33,10 @@ use oxcr_protocol::{
     uuid::Uuid,
     AsyncSet, PlayerN, PlayerNet, ProtocolPlugin,
 };
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::SocketAddr,
+    sync::{atomic::Ordering, Arc},
+};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::instrument;
@@ -84,15 +87,17 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
 
         net.send_packet(SetCompression {
             threshold: VarInt::<i32>(threshold.try_into().unwrap()),
-        })?;
+        })
+        .await?;
 
-        net.compressing.set(true).await;
+        net.compressing.store(true, Ordering::SeqCst);
     }
 
     net.send_packet(LoginSuccess {
         uuid,
         username: name.clone(),
-    })?;
+    })
+    .await?;
 
     net.state.set(State::Play).await;
 
@@ -168,7 +173,7 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
         portal_cooldown: VarInt(20),
     };
 
-    net.send_packet(login_play)?;
+    net.send_packet(login_play).await?;
 
     let difficulty = cx
         .run_on_main_thread(move |w| *w.world.resource::<DifficultySetting>())
@@ -176,20 +181,24 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
 
     net.send_packet(FeatureFlags {
         feature_flags: Array::new(&[FeatureFlags::FEATURE_VANILLA]),
-    })?;
+    })
+    .await?;
 
-    net.plugin_message(Identifier::MINECRAFT_BRAND, "implodent")?;
+    net.plugin_message(Identifier::MINECRAFT_BRAND, "implodent")
+        .await?;
 
     net.send_packet(ChangeDifficulty {
         difficulty: difficulty.difficulty,
         difficulty_locked: difficulty.is_locked,
-    })?;
+    })
+    .await?;
 
     net.send_packet(PlayerAbilities {
         flags: Abilities::FLYING,
         flying_speed: 0.05f32,
         fov_modifier: 0.1f32,
-    })?;
+    })
+    .await?;
 
     net.send_packet(SetDefaultSpawnPosition {
         location: Position {
@@ -198,7 +207,8 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
             y: 50i8.into(),
         },
         angle: 0f32,
-    })?;
+    })
+    .await?;
 
     Ok(())
 }
@@ -242,10 +252,11 @@ async fn status(net: Arc<PlayerNet>) -> Result<()> {
             },
             ..Default::default()
         }),
-    })?;
+    })
+    .await?;
 
     let PingRequest { payload } = net.recv_packet().await?;
-    net.send_packet(PongResponse { payload })?;
+    net.send_packet(PongResponse { payload }).await?;
 
     Ok(())
 }
@@ -324,30 +335,36 @@ fn on_login(rt: Res<TokioTasksRuntime>, mut ev: EventReader<PlayerLoginEvent>, q
         let player = q.get(event.entity).unwrap().0.clone();
         rt.spawn_background_task(move |task| async move {
             let cx = Arc::new(task);
-            match when_the_miette(lifecycle(player.clone(), cx.clone(), event.entity).await) {
-                Ok(()) => Ok::<(), Error>(()),
-                Err(e) => {
-                    error!(error=?e, ?player, "Disconnecting");
+            tokio::select! {
+                lfc = lifecycle(player.clone(), cx.clone(), event.entity) => match when_the_miette(lfc) {
+                    Ok(()) => Ok::<(), Error>(()),
+                    Err(e) => {
+                        error!(error=?e, ?player, "Disconnecting");
 
-                    // ignore the result because we term the connection afterwards
-                    let _ = match *(player.state.read().await) {
-                        State::Login => player.send_packet(DisconnectLogin {
-                            reason: Json(ChatComponent::String(ChatStringComponent {
-                                text: format!("{e}"),
-                                ..Default::default()
-                            })),
-                        }),
-                        State::Play => player.send_packet(DisconnectPlay {
-                            reason: Json(ChatComponent::String(ChatStringComponent {
-                                text: format!("{e}"),
-                                ..Default::default()
-                            })),
-                        }),
-                        _ => Ok(()),
-                    };
+                        // ignore the result because we term the connection afterwards
+                        let _ = match *(player.state.read().await) {
+                            State::Login => player.send_packet(DisconnectLogin {
+                                reason: Json(ChatComponent::String(ChatStringComponent {
+                                    text: format!("{e}"),
+                                    ..Default::default()
+                                })),
+                            }).await,
+                            State::Play => player.send_packet(DisconnectPlay {
+                                reason: Json(ChatComponent::String(ChatStringComponent {
+                                    text: format!("{e}"),
+                                    ..Default::default()
+                                })),
+                            }).await,
+                            _ => Ok(()),
+                        };
 
-                    player.cancellator.cancel();
+                        player.cancellator.cancel();
 
+                        Ok(())
+                    }
+                },
+                _ = player.cancellator.cancelled() => {
+                    info!("connection ended");
                     Ok(())
                 }
             }
