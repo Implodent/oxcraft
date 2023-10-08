@@ -88,7 +88,7 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
         net.send_packet(SetCompression {
             threshold: VarInt::<i32>(threshold.try_into().unwrap()),
         })?;
-        net.compressing.store(true, Ordering::SeqCst);
+        net.compressing.set(true).await;
     }
 
     net.send_packet(LoginSuccess {

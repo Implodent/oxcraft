@@ -162,7 +162,7 @@ pub struct PlayerNet {
     pub local_addr: SocketAddr,
     pub state: RwLock<State>,
     pub compression: Option<usize>,
-    pub compressing: Arc<AtomicBool>,
+    pub compressing: Arc<RwLock<bool>>,
     pub cancellator: CancellationToken,
 }
 
@@ -186,14 +186,15 @@ impl PlayerNet {
         let (s_recv, recv) = flume::unbounded();
         let (send, r_send) = flume::unbounded();
 
-        let compressing = Arc::new(AtomicBool::new(false));
+        let compressing = Arc::new(RwLock::new(false));
 
         let compressing_ = compressing.clone();
         let send_task = tokio::spawn(async move {
             let Err::<!, _>(e) = async {
                 loop {
                     let packet: SerializedPacket = r_send.recv_async().await?;
-                    let data = if compressing_.load(Ordering::SeqCst) {
+                    let compres = compressing_.get_copy().await;
+                    let data = if compression.is_some_and(|_| compres) {
                         trace!("[send]compressing");
                         packet.serialize_compressing(compression)?
                     } else {
@@ -221,7 +222,7 @@ impl PlayerNet {
                     if read_bytes == 0 {
                         return Ok::<(), crate::error::Error>(());
                     }
-                    let compres = compressing__.load(Ordering::SeqCst);
+                    let compres = compressing__.get_copy().await;
                     let spack = if let Some(cmp) = compression.filter(|_| compres) {
                         trace!("[recv]compressing");
                         let sp: SerializedPacket = SerializedPacketCompressed::deserialize
