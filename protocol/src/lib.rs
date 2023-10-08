@@ -23,6 +23,7 @@ pub mod nsfr;
 pub mod ser;
 pub use aott;
 pub use bytes;
+use bytes::Bytes;
 pub use thiserror;
 use tokio_util::sync::CancellationToken;
 pub use uuid;
@@ -122,7 +123,7 @@ impl<T: ?Sized + 'static> AsyncSet<T> for RwLock<T> {
     }
 }
 
-use aott::prelude::Parser;
+use aott::prelude::{Input, Parser};
 use bevy::{app::ScheduleRunnerPlugin, prelude::*, time::TimePlugin};
 use error::Result;
 use ser::*;
@@ -143,9 +144,15 @@ use tokio::{
     sync::RwLock,
 };
 
-use crate::model::{
-    packets::{Packet, PacketContext, PluginMessage, SerializedPacket, SerializedPacketCompressed},
-    State,
+use crate::{
+    model::{
+        packets::{
+            err_with_source, Packet, PacketContext, PluginMessage, SerializedPacket,
+            SerializedPacketCompressed,
+        },
+        State,
+    },
+    nsfr::when_the_miette,
 };
 
 #[derive(Debug)]
@@ -219,11 +226,12 @@ impl PlayerNet {
                         return Ok::<(), crate::error::Error>(());
                     }
                     let compres = compressing__.get_copy().await;
+                    let bufslice = &buf[..];
+                    let mut input = Input::new(&bufslice);
                     let spack = if let Some(cmp) = compression.filter(|_| compres) {
                         trace!("[recv]compressing");
                         let sp: SerializedPacket = SerializedPacketCompressed::deserialize
-                            .then_ignore(aott::prelude::end)
-                            .parse(buf.as_ref())?
+                            .parse_with(&mut input)?
                             .into();
                         if sp.length < cmp {
                             warn!(?sp, ?cmp, "packet length was less than threshold");
@@ -231,11 +239,9 @@ impl PlayerNet {
                         sp
                     } else {
                         trace!("[recv]not compressing");
-                        SerializedPacket::deserialize
-                            .then_ignore(aott::prelude::end)
-                            .parse(buf.as_ref())?
+                        SerializedPacket::deserialize.parse_with(&mut input)?
                     };
-                    trace!(buf=%format!("{:#x?}", &buf[..read_bytes]), ?spack, "recving packet");
+                    trace!(buf=%format!("{:#x?}", &buf[..read_bytes]), ?input.offset, ?read_bytes, unread_bytes=?read_bytes - input.offset, ?spack, "recving packet");
                     s_recv.send_async(spack).await?;
                     unsafe { std::ptr::write_bytes(buf.as_mut().as_mut_ptr(), 0u8, buf.len()) };
                 }
@@ -252,14 +258,14 @@ impl PlayerNet {
             let cancellator = cancellator_;
             select! {
                 Ok(thimg) = recv_task => {
-                    match thimg {
+                    match when_the_miette(thimg) {
                         Ok(()) => info!(%peer_addr, "Disconnected (connection ended)"),
                         Err(error) => info!(%peer_addr, ?error, "Disconnected (connection ended)")
                     }
                     cancellator.cancel();
                 }
                 Ok(Err(error)) = send_task => {
-                    error!(%peer_addr, ?error, "Disconnected (due to error)");
+                    error!(%peer_addr, error=?when_the_miette(Err::<!, _>(error)), "Disconnected (due to error)");
                     cancellator.cancel();
                 }
             }

@@ -1,5 +1,5 @@
 #![allow(unstable_name_collisions)]
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 
 use itertools::Itertools;
 use nu_ansi_term::{Color, Style};
@@ -9,7 +9,7 @@ use tracing_subscriber::{registry::LookupSpan, Layer};
 pub struct CraftLayer;
 
 impl<S: tracing::Subscriber + for<'lo> LookupSpan<'lo>> Layer<S> for CraftLayer {
-    fn on_event(&self, event: &tracing::Event<'_>, cx: tracing_subscriber::layer::Context<'_, S>) {
+    fn on_event(&self, event: &tracing::Event<'_>, _cx: tracing_subscriber::layer::Context<'_, S>) {
         // inspiration taken from pnpm
         let level = Color::Black
             .on(match *event.metadata().level() {

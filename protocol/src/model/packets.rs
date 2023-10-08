@@ -141,11 +141,8 @@ impl Deserialize for SerializedPacket {
             assert!(length_varint.0 >= 0);
             let length = length_varint.0 as usize;
             let id: VarInt<i32> = VarInt::deserialize(input)?;
-            let data = Bytes::copy_from_slice(
-                input
-                    .input
-                    .slice(input.offset..(input.offset + length - id.length_of())),
-            );
+            let data =
+                Bytes::copy_from_slice(take(length - id.length_of()).slice().parse_with(input)?);
             Self { length, id, data }
         }
     }
@@ -236,9 +233,7 @@ impl Deserialize for SerializedPacketCompressed {
                 actual_data_length,
                 "decompressing serializedpacket"
             );
-            let data_maybe = input
-                .input
-                .slice(input.offset..(input.offset + actual_data_length));
+            let data_maybe = take(actual_data_length).slice().parse_with(input)?;
             let real_data = if data_length <= 0 {
                 Bytes::copy_from_slice(data_maybe)
             } else {
