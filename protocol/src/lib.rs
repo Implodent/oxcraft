@@ -238,7 +238,7 @@ impl PlayerNet {
                     };
                     trace!(?buf, ?spack, "recving packet");
                     s_recv.send_async(spack).await?;
-                    buf.fill(0);
+                    unsafe { std::ptr::write_bytes(buf.as_mut().as_mut_ptr(), 0u8, buf.len()) };
                 }
             }
             .await?;
