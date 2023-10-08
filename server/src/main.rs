@@ -291,7 +291,7 @@ fn listen(net: Res<NetNet>, rt: Res<TokioTasksRuntime>) {
                 .run_on_main_thread(|tcx| *tcx.world.resource::<CompressionThreshold>())
                 .await;
 
-            let player = PlayerNet::new(read, write, cancellator.clone(), compress);
+            let player = PlayerNet::new(read, write, cancellator.child_token(), compress);
             let entity = t
                 .clone()
                 .run_on_main_thread(move |cx| {
@@ -349,6 +349,9 @@ fn on_login(rt: Res<TokioTasksRuntime>, mut ev: EventReader<PlayerLoginEvent>, q
                                 }),
                                 _ => Ok(()),
                             };
+
+                            player.cancellator.cancel();
+
                             Ok(())
                         }
                     }
