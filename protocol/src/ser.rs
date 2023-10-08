@@ -1037,7 +1037,7 @@ pub struct Zstd;
 #[derive(Default, Clone, Copy, Debug)]
 pub struct Gzip;
 pub trait Compression {
-    fn encode(data: Bytes) -> Result<Bytes, crate::error::Error>;
+    fn encode(data: &[u8]) -> Result<Bytes, crate::error::Error>;
     fn encode_serialize<T: Serialize>(
         thing: &T,
         buf: &mut BytesMut,
@@ -1045,13 +1045,13 @@ pub trait Compression {
     fn decode(data: &[u8]) -> Result<Bytes, crate::error::Error>;
 }
 impl Compression for Zlib {
-    fn encode(data: Bytes) -> Result<Bytes, crate::error::Error> {
+    fn encode(data: &[u8]) -> Result<Bytes, crate::error::Error> {
         use std::io::Write;
         let mut enc = flate2::write::ZlibEncoder::new(
             BytesMut::new().writer(),
             flate2::Compression::default(),
         );
-        enc.write_all(&data)?;
+        enc.write_all(data)?;
         Ok(enc.finish()?.into_inner().freeze())
     }
 

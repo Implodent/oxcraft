@@ -87,12 +87,15 @@ impl SerializedPacket {
 
     pub fn serialize_compressing(&self, compression: Option<usize>) -> Result<Bytes, Error> {
         if let Some(cmp) = compression {
-            let data_length = (self.length >= cmp)
-                .then(|| self.id.length_of() + self.data.len())
-                .unwrap_or(0);
-            let datalength = VarInt::<i32>(data_length.try_into().unwrap());
-            let length =
-                datalength.length_of() + Compress((&self.id, &self.data), Zlib).serialize()?.len();
+            let maybe_data_length = self.length + self.id.length_of();
+            let (data_length, length) = if maybe_data_length >= cmp {
+                (
+                    maybe_data_length,
+                    Zlib::encode(&self.data)?.len() + VarInt(maybe_data_length as i32).length_of(),
+                )
+            } else {
+                (0, self.length)
+            };
             let pack = SerializedPacketCompressed {
                 length,
                 data_length,
