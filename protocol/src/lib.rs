@@ -23,7 +23,7 @@ pub mod nsfr;
 pub mod ser;
 pub use aott;
 pub use bytes;
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 pub use thiserror;
 use tokio_util::sync::CancellationToken;
 pub use uuid;
@@ -147,8 +147,7 @@ use tokio::{
 use crate::{
     model::{
         packets::{
-            err_with_source, Packet, PacketContext, PluginMessage, SerializedPacket,
-            SerializedPacketCompressed,
+            Packet, PacketContext, PluginMessage, SerializedPacket, SerializedPacketCompressed,
         },
         State,
     },
@@ -221,13 +220,13 @@ impl PlayerNet {
                 loop {
                     let bufslice = &buf[..];
                     let mut input = Input::new(&bufslice);
-                    if let Some(packet) = match (if compressing__.get_copy().await {
+                    if let Some(packet) = match if compressing__.get_copy().await {
                         SerializedPacketCompressed::deserialize
                             .parse_with(&mut input)
                             .map(SerializedPacket::from)
                     } else {
                         SerializedPacket::deserialize.parse_with(&mut input)
-                    }) {
+                    } {
                         Ok(packet) => Some(packet),
                         Err(crate::error::Error::Ser(
                             crate::ser::SerializationError::UnexpectedEof { .. },
