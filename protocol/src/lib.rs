@@ -219,42 +219,32 @@ impl PlayerNet {
                 let mut buf = BytesMut::new();
 
                 let mut first = true;
-                loop {
-                    if !first {
-                        first = false;
-                        let compres = compressing__.get_copy().await;
-                        let bufslice = &buf[..];
-                        let mut input = Input::new(&bufslice);
-                        let spack = if let Some(cmp) = compression.filter(|_| compres) {
-                            trace!("[recv]compressing");
-                            let sp: SerializedPacket = SerializedPacketCompressed::deserialize
-                                .parse_with(&mut input)?
-                                .into();
-                            if sp.length < cmp {
-                                warn!(?sp, ?cmp, "packet length was less than threshold");
-                            }
-                            sp
-                        } else {
-                            trace!("[recv]not compressing");
-                            SerializedPacket::deserialize.parse_with(&mut input)?
-                        };
-                        let read_bytes = buf.len();
-                        let unread_bytes = read_bytes - input.offset;
-                        trace!(buf=%format!("{:#x?}", &buf[unread_bytes..]), ?input.offset, ?read_bytes, ?unread_bytes, ?spack, "recving packet");
-                        let offset = input.offset;
-                        drop((bufslice, input));
-                        s_recv.send_async(spack).await?;
-                        // FIXME: this is magic and should not exist
-                        let (left, right) = buf.split_at_mut(offset);
-                        left.swap_with_slice(right);
-                        drop((left, right));
-                        buf.truncate(offset);
-                    }
-                    let read_bytes = read.read_buf(&mut buf).await?;
-                    if read_bytes == 0 {
-                        return Ok::<(), crate::error::Error>(());
-                    }
+                while read.read_buf(&mut buf).await? != 0 {
+                    let compres = compressing__.get_copy().await;
+                    let bufslice = &buf[..];
+                    let mut input = Input::new(&bufslice);
+                    let spack = if let Some(cmp) = compression.filter(|_| compres) {
+                        trace!("[recv]compressing");
+                        let sp: SerializedPacket = SerializedPacketCompressed::deserialize
+                            .parse_with(&mut input)?
+                            .into();
+                        if sp.length < cmp {
+                            warn!(?sp, ?cmp, "packet length was less than threshold");
+                        }
+                        sp
+                    } else {
+                        trace!("[recv]not compressing");
+                        SerializedPacket::deserialize.parse_with(&mut input)?
+                    };
+                    let read_bytes = buf.len();
+                    let unread_bytes = read_bytes - input.offset;
+                    trace!(buf=%format!("{:#x?}", &buf[unread_bytes..]), ?input.offset, ?read_bytes, ?unread_bytes, ?spack, "recving packet");
+                    let offset = input.offset;
+                    drop((bufslice, input));
+                    s_recv.send_async(spack).await?;
+                    buf = buf.split_off(offset);
                 }
+                Ok::<(), crate::error::Error>(())
             }
             .await?;
 
