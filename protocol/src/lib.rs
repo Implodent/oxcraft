@@ -231,7 +231,9 @@ impl PlayerNet {
                         sp
                     } else {
                         trace!("[recv]not compressing");
-                        SerializedPacket::deserialize.parse(buf.as_ref())?
+                        SerializedPacket::deserialize
+                            .then_ignore(aott::prelude::end)
+                            .parse(buf.as_ref())?
                     };
                     trace!(buf=%format!("{:#x?}", &buf[..read_bytes]), ?spack, "recving packet");
                     s_recv.send_async(spack).await?;
