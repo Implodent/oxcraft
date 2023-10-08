@@ -127,7 +127,6 @@ impl<T: ?Sized + 'static> AsyncSet<T> for RwLock<T> {
 
 use aott::prelude::Parser;
 use bevy::{app::ScheduleRunnerPlugin, prelude::*, time::TimePlugin};
-use bytes::BytesMut;
 use error::Result;
 use ser::*;
 use std::{
@@ -163,7 +162,7 @@ pub struct PlayerNet {
     pub local_addr: SocketAddr,
     pub state: RwLock<State>,
     pub compression: Option<usize>,
-    pub compressing: Arc<RwLock<bool>>,
+    pub compressing: Arc<AtomicBool>,
     pub cancellator: CancellationToken,
 }
 
@@ -187,14 +186,14 @@ impl PlayerNet {
         let (s_recv, recv) = flume::unbounded();
         let (send, r_send) = flume::unbounded();
 
-        let compressing = Arc::new(RwLock::new(false));
+        let compressing = Arc::new(AtomicBool::new(false));
 
         let compressing_ = compressing.clone();
         let send_task = tokio::spawn(async move {
             let Err::<!, _>(e) = async {
                 loop {
                     let packet: SerializedPacket = r_send.recv_async().await?;
-                    let data = if compressing_.get_copy().await {
+                    let data = if compressing_.load(Ordering::SeqCst) {
                         trace!("[send]compressing");
                         packet.serialize_compressing(compression)?
                     } else {
@@ -218,11 +217,11 @@ impl PlayerNet {
                 let mut buf = box_array![0u8; model::MAX_PACKET_DATA];
 
                 loop {
-                    let read_bytes = read.read_exact(buf.as_mut()).await?;
+                    let read_bytes = read.read_buf(&mut buf.as_mut().as_mut()).await?;
                     if read_bytes == 0 {
                         return Ok::<(), crate::error::Error>(());
                     }
-                    let compres = compressing__.get_copy().await;
+                    let compres = compressing__.load(Ordering::SeqCst);
                     let spack = if let Some(cmp) = compression.filter(|_| compres) {
                         trace!("[recv]compressing");
                         let sp: SerializedPacket = SerializedPacketCompressed::deserialize
@@ -236,7 +235,7 @@ impl PlayerNet {
                         trace!("[recv]not compressing");
                         SerializedPacket::deserialize.parse(buf.as_ref())?
                     };
-                    trace!(?buf, ?spack, "recving packet");
+                    trace!(buf=?buf[..spack.length], ?spack, "recving packet");
                     s_recv.send_async(spack).await?;
                     unsafe { std::ptr::write_bytes(buf.as_mut().as_mut_ptr(), 0u8, buf.len()) };
                 }
