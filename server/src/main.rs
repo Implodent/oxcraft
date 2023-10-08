@@ -326,38 +326,30 @@ fn on_login(rt: Res<TokioTasksRuntime>, mut ev: EventReader<PlayerLoginEvent>, q
         let player = q.get(event.entity).unwrap().0.clone();
         rt.spawn_background_task(move |task| async move {
             let cx = Arc::new(task);
-            tokio::select! {
-                lfc = lifecycle(player.clone(), cx.clone(), event.entity) => {
-                    match when_the_miette(lfc) {
-                        Ok(()) => Ok::<(), Error>(()),
-                        Err(e) => {
-                            error!(error=?e, ?player, "Disconnecting");
+            match when_the_miette(lifecycle(player.clone(), cx.clone(), event.entity).await) {
+                Ok(()) => Ok::<(), Error>(()),
+                Err(e) => {
+                    error!(error=?e, ?player, "Disconnecting");
 
-                            // ignore the result because we term the connection afterwards
-                            let _ = match *(player.state.read().await) {
-                                State::Login => player.send_packet(DisconnectLogin {
-                                    reason: Json(ChatComponent::String(ChatStringComponent {
-                                        text: format!("{e}"),
-                                        ..Default::default()
-                                    })),
-                                }),
-                                State::Play => player.send_packet(DisconnectPlay {
-                                    reason: Json(ChatComponent::String(ChatStringComponent {
-                                        text: format!("{e}"),
-                                        ..Default::default()
-                                    })),
-                                }),
-                                _ => Ok(()),
-                            };
+                    // ignore the result because we term the connection afterwards
+                    let _ = match *(player.state.read().await) {
+                        State::Login => player.send_packet(DisconnectLogin {
+                            reason: Json(ChatComponent::String(ChatStringComponent {
+                                text: format!("{e}"),
+                                ..Default::default()
+                            })),
+                        }),
+                        State::Play => player.send_packet(DisconnectPlay {
+                            reason: Json(ChatComponent::String(ChatStringComponent {
+                                text: format!("{e}"),
+                                ..Default::default()
+                            })),
+                        }),
+                        _ => Ok(()),
+                    };
 
-                            player.cancellator.cancel();
+                    player.cancellator.cancel();
 
-                            Ok(())
-                        }
-                    }
-                },
-                () = player.cancellator.cancelled() => {
-                    error!("connection terminated");
                     Ok(())
                 }
             }
