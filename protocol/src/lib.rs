@@ -34,6 +34,7 @@ pub use indexmap;
 pub use miette;
 pub use nu_ansi_term as ansi;
 pub use tracing;
+
 /// A macro similar to `vec![$elem; $size]` which returns a boxed array.
 ///
 /// ```rust
@@ -53,10 +54,6 @@ macro_rules! box_array {
 
         vec_to_boxed_array(vec![$val; $len])
     }};
-}
-
-pub async fn rwlock_set<T: 'static>(rwlock: &RwLock<T>, value: T) {
-    rwlock.set(value).await
 }
 
 pub trait AsyncGet<T: ?Sized + 'static> {
@@ -133,10 +130,7 @@ use std::{
     fmt::Debug,
     net::SocketAddr,
     ops::{Deref, DerefMut},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::Duration,
 };
 
@@ -218,7 +212,9 @@ impl PlayerNet {
                 let mut buf = box_array![0u8; model::MAX_PACKET_DATA];
 
                 loop {
-                    let read_bytes = read.read_buf(&mut buf.as_mut().as_mut()).await?;
+                    debug!("three two one explode");
+                    let read_bytes = read.read(&mut buf.as_mut().as_mut()).await?;
+                    debug!(%read_bytes, "didn't explode");
                     if read_bytes == 0 {
                         return Ok::<(), crate::error::Error>(());
                     }
@@ -226,6 +222,7 @@ impl PlayerNet {
                     let spack = if let Some(cmp) = compression.filter(|_| compres) {
                         trace!("[recv]compressing");
                         let sp: SerializedPacket = SerializedPacketCompressed::deserialize
+                            .then_ignore(aott::prelude::end)
                             .parse(buf.as_ref())?
                             .into();
                         if sp.length < cmp {
@@ -236,7 +233,7 @@ impl PlayerNet {
                         trace!("[recv]not compressing");
                         SerializedPacket::deserialize.parse(buf.as_ref())?
                     };
-                    trace!(buf=?buf[..spack.length], ?spack, "recving packet");
+                    trace!(buf=%format!("{:#x?}", &buf[..read_bytes]), ?spack, "recving packet");
                     s_recv.send_async(spack).await?;
                     unsafe { std::ptr::write_bytes(buf.as_mut().as_mut_ptr(), 0u8, buf.len()) };
                 }

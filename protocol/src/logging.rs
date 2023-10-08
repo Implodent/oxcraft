@@ -4,16 +4,12 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use nu_ansi_term::{Color, Style};
 use tracing::{field::Field, Level};
-use tracing_subscriber::Layer;
+use tracing_subscriber::{registry::LookupSpan, Layer};
 
 pub struct CraftLayer;
 
-impl<S: tracing::Subscriber> Layer<S> for CraftLayer {
-    fn on_event(
-        &self,
-        event: &tracing::Event<'_>,
-        _context: tracing_subscriber::layer::Context<'_, S>,
-    ) {
+impl<S: tracing::Subscriber + for<'lo> LookupSpan<'lo>> Layer<S> for CraftLayer {
+    fn on_event(&self, event: &tracing::Event<'_>, cx: tracing_subscriber::layer::Context<'_, S>) {
         // inspiration taken from pnpm
         let level = Color::Black
             .on(match *event.metadata().level() {
@@ -24,7 +20,7 @@ impl<S: tracing::Subscriber> Layer<S> for CraftLayer {
                 Level::TRACE => Color::Purple,
             })
             .bold()
-            .paint(format!(" {:<5} ", event.metadata().level().as_str()));
+            .paint(format!(" {} ", event.metadata().level().as_str()));
 
         let mut visitor = CraftVisitor {
             message: None,
@@ -45,8 +41,8 @@ impl<S: tracing::Subscriber> Layer<S> for CraftLayer {
             String::new()
         } else {
             let padding = " ".repeat(
-                // max length of level
-                7
+                // length of level
+                event.metadata().level().as_str().len()
                     // space after level before target
                     + 1,
             );

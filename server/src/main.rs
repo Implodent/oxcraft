@@ -29,15 +29,11 @@ use oxcr_protocol::{
     },
     nbt::{nbt_serde, Nbt, NbtList, NbtTagType},
     nsfr::when_the_miette,
-    rwlock_set,
     ser::{Array, Identifier, Json, Namespace, Position},
     uuid::Uuid,
     AsyncSet, PlayerN, PlayerNet, ProtocolPlugin,
 };
-use std::{
-    net::SocketAddr,
-    sync::{atomic::Ordering, Arc},
-};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::instrument;
@@ -85,9 +81,11 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
 
     if let Some(threshold) = net.compression {
         debug!(%threshold, ?net, "compressing");
+
         net.send_packet(SetCompression {
             threshold: VarInt::<i32>(threshold.try_into().unwrap()),
         })?;
+
         net.compressing.set(true).await;
     }
 
@@ -206,7 +204,7 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
 }
 
 async fn status(net: Arc<PlayerNet>) -> Result<()> {
-    rwlock_set(&net.state, State::Status).await;
+    net.state.set(State::Status).await;
 
     let _: StatusRequest = net.recv_packet().await?;
     net.send_packet(StatusResponse {
