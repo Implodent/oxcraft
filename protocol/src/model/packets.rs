@@ -235,11 +235,12 @@ impl Deserialize for SerializedPacketCompressed {
             );
             let data_maybe = input.input.slice_from(input.offset..);
             let real_data = if data_length > 0 {
-                Zlib::decode(data_maybe)?
+                let real_data = Zlib::decode(data_maybe)?;
+                assert_eq!(real_data.len(), data_length);
+                real_data
             } else {
                 Bytes::copy_from_slice(data_maybe)
             };
-            assert_eq!(real_data.len(), data_length);
             let data_slice = real_data.deref();
             let mut data_input = Input::new(&data_slice);
             let id = VarInt::<i32>::deserialize

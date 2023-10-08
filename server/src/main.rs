@@ -14,7 +14,7 @@ use oxcr_protocol::{
         chat::{self, *},
         packets::{
             handshake::{Handshake, HandshakeNextState},
-            login::{DisconnectLogin, LoginStart, LoginSuccess},
+            login::{DisconnectLogin, LoginStart, LoginSuccess, SetCompression},
             play::{
                 Abilities, ChangeDifficulty, DisconnectPlay, FeatureFlags, GameMode, LoginPlay,
                 PlayerAbilities, PreviousGameMode, SetDefaultSpawnPosition,
@@ -34,8 +34,12 @@ use oxcr_protocol::{
     uuid::Uuid,
     AsyncSet, PlayerN, PlayerNet, ProtocolPlugin,
 };
-use std::{net::SocketAddr, sync::Arc};
-use tokio::{net::TcpListener, sync::mpsc};
+use std::{
+    net::SocketAddr,
+    sync::{atomic::Ordering, Arc},
+};
+use tokio::net::TcpListener;
+use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 use tracing_subscriber::{
     prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
@@ -78,6 +82,14 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
     });
 
     info!(?name, ?uuid, addr=%net.peer_addr, "Player joined");
+
+    if let Some(threshold) = net.compression {
+        debug!(%threshold, ?net, "compressing");
+        net.send_packet(SetCompression {
+            threshold: VarInt::<i32>(threshold.try_into().unwrap()),
+        })?;
+        net.compressing.set(true).await;
+    }
 
     net.send_packet(LoginSuccess {
         uuid,
@@ -257,7 +269,6 @@ impl Clone for NetNet {
 struct PlayerLoginEvent {
     pub addr: SocketAddr,
     pub entity: Entity,
-    pub shit: mpsc::Sender<()>,
 }
 
 fn listen(net: Res<NetNet>, rt: Res<TokioTasksRuntime>) {
@@ -274,27 +285,25 @@ fn listen(net: Res<NetNet>, rt: Res<TokioTasksRuntime>) {
             info!(%addr, "accepted");
 
             let (read, write) = tcp.into_split();
-            let (shit, mut shit_r) = mpsc::channel(1);
+            let cancellator = CancellationToken::new();
 
             let CompressionThreshold(compress) = t
                 .run_on_main_thread(|tcx| *tcx.world.resource::<CompressionThreshold>())
                 .await;
 
-            let player = PlayerNet::new(read, write, shit.clone(), compress);
+            let player = PlayerNet::new(read, write, cancellator.clone(), compress);
             let entity = t
                 .clone()
                 .run_on_main_thread(move |cx| {
                     let entity = cx.world.spawn((PlayerN(Arc::new(player)),)).id();
-                    cx.world.send_event(PlayerLoginEvent { entity, addr, shit });
+                    cx.world.send_event(PlayerLoginEvent { entity, addr });
                     entity
                 })
                 .await;
 
             tokio::spawn(async move {
                 let taske = t;
-                shit_r.recv().await.expect("AAAAAAAAAAAAAAAAAAAAAAAAAA");
-
-                drop(shit_r);
+                cancellator.cancelled_owned().await;
 
                 taske
                     .run_on_main_thread(move |cx| {
@@ -315,35 +324,39 @@ fn on_login(rt: Res<TokioTasksRuntime>, mut ev: EventReader<PlayerLoginEvent>, q
     for event in ev.iter().cloned() {
         info!(%event.addr, "Logged in");
         let player = q.get(event.entity).unwrap().0.clone();
-        let shit = event.shit.to_owned();
         rt.spawn_background_task(move |task| async move {
             let cx = Arc::new(task);
-            match when_the_miette(lifecycle(player.clone(), cx.clone(), event.entity).await) {
-                Ok(()) => Ok::<(), Error>(()),
-                Err(e) => {
-                    error!(error=?e, ?player, "Disconnecting");
+            tokio::select! {
+                lfc = lifecycle(player.clone(), cx.clone(), event.entity) => {
+                    match when_the_miette(lfc) {
+                        Ok(()) => Ok::<(), Error>(()),
+                        Err(e) => {
+                            error!(error=?e, ?player, "Disconnecting");
 
-                    // ignore the result because we term the connection afterwards
-                    let _ = match *(player.state.read().await) {
-                        State::Login => player.send_packet(DisconnectLogin {
-                            reason: Json(ChatComponent::String(ChatStringComponent {
-                                text: format!("{e}"),
-                                ..Default::default()
-                            })),
-                        }),
-                        State::Play => player.send_packet(DisconnectPlay {
-                            reason: Json(ChatComponent::String(ChatStringComponent {
-                                text: format!("{e}"),
-                                ..Default::default()
-                            })),
-                        }),
-                        _ => Ok(()),
-                    };
-                    shit.send(())
-                        .await
-                        .unwrap_or_else(|_| error!("disconnect failed (already disconnected)"));
-                    Ok(())
-                }
+                            // ignore the result because we term the connection afterwards
+                            let _ = match *(player.state.read().await) {
+                                State::Login => player.send_packet(DisconnectLogin {
+                                    reason: Json(ChatComponent::String(ChatStringComponent {
+                                        text: format!("{e}"),
+                                        ..Default::default()
+                                    })),
+                                }),
+                                State::Play => player.send_packet(DisconnectPlay {
+                                    reason: Json(ChatComponent::String(ChatStringComponent {
+                                        text: format!("{e}"),
+                                        ..Default::default()
+                                    })),
+                                }),
+                                _ => Ok(()),
+                            };
+                            player.cancellator.cancel();
+                            Ok(())
+                        }
+                    }
+                },
+                () = player.cancellator.cancelled() => {
+                    error!("connection terminated");
+                    Ok(()) }
             }
         });
     }
@@ -417,7 +430,7 @@ That was my warning, now I wish you good luck debugging your issue."#
         .init_resource::<Registry<DimensionType>>()
         .init_resource::<Registry<WorldgenBiome>>()
         .init_resource::<Registry<DamageType>>()
-        .insert_resource(CompressionThreshold(None))
+        .insert_resource(CompressionThreshold(Some(256)))
         .add_systems(Startup, (init_registries, listen))
         .add_systems(Update, on_login)
         .run();

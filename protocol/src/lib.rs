@@ -24,6 +24,7 @@ pub mod ser;
 pub use aott;
 pub use bytes;
 pub use thiserror;
+use tokio_util::sync::CancellationToken;
 pub use uuid;
 pub mod serde {
     pub use ::serde::*;
@@ -42,6 +43,16 @@ pub trait AsyncGet<T: ?Sized + 'static> {
     type Ptr<'a, D: ?Sized + 'static>: Deref<Target = D> + 'a;
 
     async fn get(&self) -> Self::Ptr<'_, T>;
+
+    async fn get_copy(&self) -> T
+    where
+        T: Copy,
+    {
+        let ptr = self.get().await;
+        let val = *(ptr.deref());
+        drop(ptr);
+        val
+    }
 }
 
 pub trait AsyncSet<T: ?Sized + 'static>: AsyncGet<T> {
@@ -103,7 +114,10 @@ use std::{
     fmt::Debug,
     net::SocketAddr,
     ops::{Deref, DerefMut},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -113,7 +127,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
     select,
-    sync::{mpsc, RwLock},
+    sync::RwLock,
 };
 
 use crate::model::{
@@ -129,7 +143,8 @@ pub struct PlayerNet {
     pub local_addr: SocketAddr,
     pub state: RwLock<State>,
     pub compression: Option<usize>,
-    pub _explode: mpsc::Sender<()>,
+    pub compressing: Arc<RwLock<bool>>,
+    pub cancellator: CancellationToken,
 }
 
 #[derive(Component, Deref, Debug)]
@@ -143,7 +158,7 @@ impl PlayerNet {
     pub fn new(
         mut read: OwnedReadHalf,
         mut write: OwnedWriteHalf,
-        shit: mpsc::Sender<()>,
+        cancellator: CancellationToken,
         compression: Option<usize>,
     ) -> Self {
         let peer_addr = read.peer_addr().expect("no peer address");
@@ -152,11 +167,21 @@ impl PlayerNet {
         let (s_recv, recv) = flume::unbounded();
         let (send, r_send) = flume::unbounded();
 
+        let compressing = Arc::new(RwLock::new(false));
+
+        let compressing_ = compressing.clone();
         let send_task = tokio::spawn(async move {
             let Err::<!, _>(e) = async {
                 loop {
                     let packet: SerializedPacket = r_send.recv_async().await?;
-                    let data = packet.serialize_compressing(compression)?;
+                    let data = if compressing_.get_copy().await {
+                        trace!("[send]compressing");
+                        packet.serialize_compressing(compression)?
+                    } else {
+                        trace!("[send]not compressing");
+                        packet.serialize()?
+                    };
+                    trace!(?packet, ?data, "sending packet");
                     write.write_all(&data).await?;
                 }
             }
@@ -167,6 +192,7 @@ impl PlayerNet {
             return Err::<!, crate::error::Error>(e);
         });
 
+        let compressing__ = compressing.clone();
         let recv_task = tokio::spawn(async move {
             async {
                 let mut buf = BytesMut::new();
@@ -176,8 +202,15 @@ impl PlayerNet {
                     if read_bytes == 0 {
                         return Ok::<(), crate::error::Error>(());
                     }
-                    let spack = SerializedPacket::deserialize_compressing(compression)
-                        .parse(buf.as_ref())?;
+                    let spack = if compressing__.get_copy().await {
+                        trace!("[recv]compressing");
+                        SerializedPacket::deserialize_compressing(compression)
+                            .parse(buf.as_ref())?
+                    } else {
+                        trace!("[recv]not compressing");
+                        SerializedPacket::deserialize.parse(buf.as_ref())?
+                    };
+                    trace!(?buf, ?spack, "recving packet");
                     s_recv.send_async(spack).await?;
                     buf.clear();
                 }
@@ -189,20 +222,23 @@ impl PlayerNet {
             Ok::<(), crate::error::Error>(())
         });
 
-        let shitshit = shit.clone();
+        let cancellator_ = cancellator.clone();
         tokio::spawn(async move {
-            let shit = shitshit;
+            let cancellator = cancellator_;
             select! {
                 Ok(thimg) = recv_task => {
                     match thimg {
                         Ok(()) => info!(%peer_addr, "Disconnected (connection ended)"),
                         Err(error) => info!(%peer_addr, ?error, "Disconnected (connection ended)")
                     }
-                    shit.send(()).await.unwrap_or_else(|_| error!("disconnect failed (already disconnected)"));
+                    cancellator.cancel();
                 }
                 Ok(Err(error)) = send_task => {
                     error!(%peer_addr, ?error, "Disconnected (due to error)");
-                    shit.send(()).await.unwrap_or_else(|_| error!("disconnect failed (already disconnected)"));
+                    cancellator.cancel();
+                }
+                _ = cancellator.cancelled() => {
+                    info!("cancellator'd");
                 }
             }
         });
@@ -214,7 +250,8 @@ impl PlayerNet {
             local_addr,
             state: RwLock::new(State::Handshaking),
             compression,
-            _explode: shit,
+            compressing,
+            cancellator,
         }
     }
 
@@ -222,11 +259,6 @@ impl PlayerNet {
     pub async fn recv_packet<T: Packet + Deserialize<Context = PacketContext> + Debug>(
         &self,
     ) -> Result<T> {
-        let tnov = std::any::type_name::<T>();
-        if self.recv.is_disconnected() {
-            trace!(packet=tnov, addr=%self.peer_addr, "receiving packet failed - disconnected");
-            return Err(crate::error::Error::ConnectionEnded);
-        }
         let packet = self.recv.recv_async().await?;
         let state = *self.state.read().await;
         trace!(%self.peer_addr, ?packet, ?state, "Received packet");
@@ -237,10 +269,6 @@ impl PlayerNet {
 
     /// Writes a packet.
     pub fn send_packet<T: Packet + Serialize + Debug>(&self, packet: T) -> Result<()> {
-        if self.send.is_disconnected() {
-            trace!(?packet, addr=%self.peer_addr, "sending packet failed - disconnected");
-            return Err(crate::error::Error::ConnectionEnded);
-        }
         let spack = SerializedPacket::new_ref(&packet)?;
         trace!(?packet, addr=%self.peer_addr, ?spack, "Sending packet");
         Ok(self.send.send(spack)?)

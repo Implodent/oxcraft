@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::{
     error::Error,
     model::{chat::ChatComponent, State, VarInt},
-    ser::{deser_cx, Deserialize, Extra, FixedStr, Json, Serialize},
+    ser::{deser_cx, impl_ser, Deserialize, Extra, FixedStr, Json, Serialize},
 };
 
 use super::{Packet, PacketContext};
@@ -104,4 +104,16 @@ impl Serialize for Property {
         self.signature.serialize_to(buf)?;
         Ok(())
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct SetCompression {
+    pub threshold: VarInt,
+}
+
+impl_ser!(|PacketContext| SetCompression => [threshold]);
+
+impl Packet for SetCompression {
+    const ID: VarInt = VarInt(0x04);
+    const STATE: State = State::Login;
 }

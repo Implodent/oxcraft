@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 bevy.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 derive_more = "0.99.17"
 tracing.workspace = true
 thiserror.workspace = true
