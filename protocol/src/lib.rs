@@ -191,7 +191,6 @@ impl PlayerNet {
 
         let compressing = Arc::new(AtomicBool::new(false));
 
-        let compressing_ = compressing.clone();
         let send_task = tokio::spawn(async move {
             let Err::<!, _>(e) = async {
                 loop {
@@ -203,7 +202,7 @@ impl PlayerNet {
                         trace!("[send]not compressing");
                         packet.serialize()?
                     };
-                    trace!(?packet, ?data, "sending packet");
+                    trace!(initial_packet=?packet, ?data, "sending packet");
                     write.write_all(&data).await?;
                 }
             }

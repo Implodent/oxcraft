@@ -87,16 +87,24 @@ impl SerializedPacket {
 
     pub fn serialize_compressing(&self, compression: Option<usize>) -> Result<Bytes, Error> {
         if let Some(cmp) = compression {
-            let maybe_data_length = self.length + self.id.length_of();
-            let (data_length, length) = if maybe_data_length >= cmp {
+            let (data_length, length) = if self.length >= cmp {
                 (
-                    maybe_data_length,
-                    Zlib::encode(&self.data)?.len() + VarInt(maybe_data_length as i32).length_of(),
+                    self.length,
+                    Compress((&self.id, &self.data), Zlib).serialize()?.len()
+                        + VarInt(self.length as i32).length_of(),
                 )
             } else {
-                trace!("packet was smaller than threshold {cmp}, sending uncompressed");
-                (0, self.length)
+                trace!(
+                    threshold=%cmp,
+                    actual_length=%self.length,
+                    cmpr_length=%self.length + 1,
+                    id_length=%self.id.length_of(),
+                    data_length=%self.data.len(),
+                    "packet was smaller than threshold, sending uncompressed"
+                );
+                (0, self.length + 1)
             };
+
             let pack = SerializedPacketCompressed {
                 length,
                 data_length,
