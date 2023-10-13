@@ -21,7 +21,7 @@ use crate::model::VarInt;
 use ::bytes::{BufMut, Bytes, BytesMut};
 pub use aott::prelude::parser;
 pub use aott::prelude::Parser;
-use aott::{pfn_type, prelude::*, text::CharError};
+use aott::{error::FundamentalError, pfn_type, prelude::*, text::CharError};
 use tracing::debug;
 
 pub trait Deserialize: Sized {
@@ -94,14 +94,6 @@ pub enum SerializationError<Item: Debug + Display> {
         found: Item,
         #[label = "end of input was expected here"]
         at: SourceSpan,
-    },
-    #[error("filter failed in {location}, while checking {token}")]
-    #[diagnostic(code(aott::error::filter_failed))]
-    FilterFailed {
-        #[label = "this is the token that didn't pass"]
-        at: SourceSpan,
-        location: &'static core::panic::Location<'static>,
-        token: Item,
     },
     #[error("expected keyword {keyword}")]
     #[diagnostic(code(aott::text::error::expected_keyword))]
@@ -268,7 +260,7 @@ impl<'a, C> ParserExtras<&'a [u8]> for Extra<C> {
     type Error = crate::error::Error;
 }
 
-impl<'a> Error<&'a [u8]> for crate::error::Error {
+impl<'a> FundamentalError<&'a [u8]> for crate::error::Error {
     fn expected_eof_found(span: Range<usize>, found: <&'a [u8] as InputType>::Token) -> Self {
         Self::Ser(SerializationError::ExpectedEof {
             found,
@@ -297,18 +289,6 @@ impl<'a> Error<&'a [u8]> for crate::error::Error {
             expected,
         })
     }
-
-    fn filter_failed(
-        span: Range<usize>,
-        location: &'static core::panic::Location<'static>,
-        token: <&'a [u8] as InputType>::Token,
-    ) -> Self {
-        Self::Ser(SerializationError::FilterFailed {
-            at: span.into(),
-            location,
-            token,
-        })
-    }
 }
 
 impl<'a, C> ParserExtras<&'a str> for Extra<C> {
@@ -316,7 +296,7 @@ impl<'a, C> ParserExtras<&'a str> for Extra<C> {
     type Error = crate::error::Error;
 }
 
-impl<'a> Error<&'a str> for crate::error::Error {
+impl<'a> FundamentalError<&'a str> for crate::error::Error {
     fn expected_eof_found(span: Range<usize>, found: <&'a str as InputType>::Token) -> Self {
         Self::SerStr(SerializationError::ExpectedEof {
             found,
@@ -345,47 +325,6 @@ impl<'a> Error<&'a str> for crate::error::Error {
             expected,
         })
     }
-
-    fn filter_failed(
-        span: Range<usize>,
-        location: &'static core::panic::Location<'static>,
-        token: <&'a str as InputType>::Token,
-    ) -> Self {
-        Self::SerStr(SerializationError::FilterFailed {
-            at: span.into(),
-            location,
-            token,
-        })
-    }
-}
-
-impl CharError<char> for crate::error::Error {
-    fn expected_digit(span: Range<usize>, radix: u32, got: char) -> Self {
-        Self::SerStr(SerializationError::ExpectedDigit {
-            at: span.into(),
-            radix,
-            found: got,
-        })
-    }
-
-    fn expected_ident_char(span: Range<usize>, got: char) -> Self {
-        Self::SerStr(SerializationError::ExpectedIdent {
-            at: span.into(),
-            found: got,
-        })
-    }
-
-    fn expected_keyword<'a, 'b: 'a>(
-        span: Range<usize>,
-        keyword: &'b <char as text::Char>::Str,
-        actual: &'a <char as text::Char>::Str,
-    ) -> Self {
-        Self::SerStr(SerializationError::ExpectedKeyword {
-            at: span.into(),
-            keyword: keyword.to_owned(),
-            found: actual.to_owned(),
-        })
-    }
 }
 
 pub type Resul<'a, T, C = ()> = PResult<&'a [u8], T, Extra<C>>;
@@ -398,56 +337,6 @@ pub fn deser_cx<T: Deserialize<Context = ()>, C>(input: &[u8]) -> T {
 #[parser(extras = "Extra<C>")]
 pub fn deser<T: Deserialize<Context = C>, C>(input: &[u8]) -> T {
     T::deserialize(input)
-}
-
-#[track_caller]
-pub fn no_context<
-    I: InputType,
-    O,
-    E: ParserExtras<I, Context = ()>,
-    EE: ParserExtras<I, Context = C, Error = E::Error>,
-    C,
-    P: Parser<I, O, E>,
->(
-    parser: P,
-) -> pfn_type!(I, O, EE) {
-    #[track_caller]
-    move |input| {
-        let mut inp = Input {
-            offset: input.offset,
-            input: input.input,
-            cx: &(),
-        };
-        let value = parser.parse_with(&mut inp)?;
-        input.offset = inp.offset;
-        Ok(value)
-    }
-}
-
-#[track_caller]
-pub fn with_context<
-    I: InputType,
-    O,
-    E: ParserExtras<I, Context = C2>,
-    EE: ParserExtras<I, Context = C1, Error = E::Error>,
-    C1,
-    C2,
-    P: Parser<I, O, E>,
->(
-    parser: P,
-    context: C2,
-) -> pfn_type!(I, O, EE) {
-    #[track_caller]
-    move |input| {
-        let mut inp = Input {
-            offset: input.offset,
-            input: input.input,
-            cx: &context,
-        };
-        let value = parser.parse_with(&mut inp)?;
-        input.offset = inp.offset;
-        Ok(value)
-    }
 }
 
 #[parser(extras = E)]
