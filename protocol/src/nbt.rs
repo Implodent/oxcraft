@@ -18,6 +18,11 @@ use serde::{
 
 use crate::ser::*;
 
+#[derive(Clone, Debug, thiserror::Error, miette::Diagnostic)]
+pub enum Label {
+    InvalidTagType(u8)
+}
+
 #[derive(Debug, Clone, derive_more::From)]
 pub enum Nbt {
     Byte(i8),
@@ -229,7 +234,7 @@ impl NbtTag {
             tag,
             name,
             // SAFETY: end tag type was handled beforehand, so we can safely unwrap_unchecked here
-            value: unsafe { with_context(Nbt::single, tag)(input)?.unwrap_unchecked() },
+            value: unsafe { Nbt::single(&mut input.with_context(&tag))?.unwrap_unchecked() },
         }))
     }
 
@@ -279,7 +284,7 @@ pub enum NbtTagType {
 
 #[parser(extras = "Extra<()>")]
 fn nbt_tag(input: &[u8]) -> NbtTagType {
-    any.filter(|b| (0u8..=12u8).contains(b))
+    any.filter(|b| (0u8..=12u8).contains(b), |b| Label::)
         // SAFETY: in filter we filter the tag types to be in bounds
         .map(|b| unsafe { *(&b as *const u8 as *const NbtTagType) })
         .parse_with(input)
@@ -355,7 +360,7 @@ impl<T: for<'de> serde::de::Deserialize<'de>> Deserialize for NbtSerde<T> {
     fn deserialize<'a>(
         input: &mut aott::prelude::Input<&'a [u8], Extra<Self::Context>>,
     ) -> aott::PResult<&'a [u8], Self, Extra<Self::Context>> {
-        let Some(tag) = with_context(Nbt::single, NbtTagType::Compound)(input)? else {
+        let Some(tag) = Nbt::single(&mut input.with_context(&NbtTagType::Compound))? else {
             return Err(NbtError::ExpectedAnythingButEnd.into());
         };
 
