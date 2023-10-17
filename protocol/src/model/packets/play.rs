@@ -6,7 +6,7 @@ use crate::{
 };
 use std::ptr;
 
-use aott::primitive::one_of;
+use aott::primitive::{filter, one_of};
 use bytes::BufMut;
 use indexmap::IndexMap;
 
@@ -106,7 +106,7 @@ impl Deserialize for GameMode {
     fn deserialize<'a>(
         input: &mut aott::prelude::Input<&'a [u8], Extra<Self::Context>>,
     ) -> aott::PResult<&'a [u8], Self, Extra<Self::Context>> {
-        let byte = one_of([0x0, 0x1, 0x2, 0x3])(input)?;
+        let byte = filter(|x| matches!(x, 0..=3), Type::GameMode)(input)?;
         Ok(unsafe { *ptr::addr_of!(byte).cast() })
     }
 }
@@ -131,7 +131,7 @@ impl Deserialize for PreviousGameMode {
         input: &mut aott::prelude::Input<&'a [u8], Extra<Self::Context>>,
     ) -> aott::PResult<&'a [u8], Self, Extra<Self::Context>> {
         let byte = aott::bytes::number::big::i8
-            .filter(|g| (-1..=3).contains(g))
+            .filter(|g| (-1..=3).contains(g), Type::PreviousGameMode)
             .parse_with(input)?;
         Ok(unsafe { *ptr::addr_of!(byte).cast() })
     }

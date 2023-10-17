@@ -1,19 +1,25 @@
-use std::cmp::Ordering;
-
 use super::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thiserror::Error, miette::Diagnostic)]
 pub enum Label {
+    #[error("expected boolean")]
     Boolean,
+    #[error("{_0}")]
     String(StringError),
+    #[error("expected previous gamemode (-1 ..= 3), but got {_0}")]
+    PreviousGameMode(i8),
+    #[error("expected difficulty (0 ..= 3)")]
+    Difficulty,
+    #[error("expected gamemode (0 ..= 3)")]
+    GameMode,
 }
 
 #[derive(Clone, Debug, thiserror::Error, miette::Diagnostic)]
 pub enum StringError {
-    #[error("Length of string (VarInt) was out of bounds for usize: {_0}")]
+    #[error("length of string (VarInt) was out of bounds for usize: {_0}")]
     #[diagnostic(code(protocol::ser::types::string::usize_oob))]
     LengthOOB(i32),
-    #[error("Length of FixedStr exceeded maximum ({expected}): {actual}")]
+    #[error("length of FixedStr exceeded maximum ({expected}): {actual}")]
     #[diagnostic(code(protocol::ser::types::fixed_str::length_bigger_than_expected))]
     FixedLengthBigger { expected: usize, actual: usize },
 }
@@ -188,7 +194,7 @@ impl<T: Deserialize> Deserialize for Option<T> {
 
     #[parser(extras = "Extra<Self::Context>")]
     fn deserialize(input: &[u8]) -> Self {
-        let exists = filter(|x| x < 0x2, Label::Boolean)
+        let exists = filter(|x| *x < 0x2, Label::Boolean)
             .map(|t| t == 0x1)
             .parse_with(input)?;
 
@@ -484,9 +490,8 @@ impl Serialize for bool {
 
 impl Deserialize for bool {
     #[parser(extras = "Extra<Self::Context>")]
-    #[track_caller]
     fn deserialize(input: &[u8]) -> Self {
-        Ok(one_of([0x0, 0x1])(input)? == 0x1)
+        Ok(filter(|x| *x < 2, Label::Boolean).parse_with(input)? == 0x1)
     }
 }
 

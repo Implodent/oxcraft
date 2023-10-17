@@ -21,14 +21,14 @@ use crate::model::VarInt;
 use ::bytes::{BufMut, Bytes, BytesMut};
 pub use aott::prelude::parser;
 pub use aott::prelude::Parser;
-use aott::{error::FundamentalError, pfn_type, prelude::*};
+use aott::{error::FundamentalError, iter::IterParser, pfn_type, prelude::*};
 use tracing::debug;
 
 mod error;
 mod types;
 
 pub use error::*;
-pub use types::*;
+pub use types::{Label as Type, *};
 
 pub trait Deserialize: Sized {
     type Context = ();
@@ -142,4 +142,19 @@ macro deserialize_field {
 pub macro impl_ser($(|$context:ty|)? $ty:ty => [$($(|$cx:ty|)?$field:ident),*$(,)?]) {
     crate::ser::deserialize!($(|$context|)? $ty => [$($(|$cx|)?$field,)*]);
     crate::ser::serialize!($ty => [$($field,)*]);
+}
+
+#[inline(always)]
+pub fn no_context<I: InputType, O, E: ParserExtras<I>, EV: ParserExtras<I, Context = ()>>(
+    parser: impl Parser<I, O, EV>,
+) -> impl Fn(&mut Input<I, E>) -> Result<O, EV::Error> {
+    move |input| parser.parse_with(&mut input.no_context())
+}
+
+#[inline(always)]
+pub fn with_context<I: InputType, O, E: ParserExtras<I>, E2: ParserExtras<I, Context = C>, C>(
+    parser: impl Parser<I, O, E2>,
+    context: C,
+) -> impl Fn(&mut Input<I, E>) -> Result<O, E2::Error> {
+    move |input| parser.parse_with(&mut input.with_context(&context))
 }

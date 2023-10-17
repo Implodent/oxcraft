@@ -35,7 +35,7 @@ pub enum SerializationError<Item: Debug + Display + Char> {
         at: SourceSpan,
     },
 
-    #[error("type error {label}, last token is {last_token:?}")]
+    #[error("{label}; last token is {last_token:?}")]
     Type {
         #[label = "here"]
         at: SourceSpan,
@@ -46,36 +46,75 @@ pub enum SerializationError<Item: Debug + Display + Char> {
         last_token: Option<Item>,
     },
 
-    #[error("strign error {label}, last token is {last_token:?}")]
+    #[error("{label}; last token is {last_token:?}")]
     String {
         #[label = "here"]
         at: SourceSpan,
-        #[source]
         label: aott::text::CharLabel<Item>,
+        last_token: Option<Item>,
+    },
+
+    #[error("{label}; last token was {last_token:?}")]
+    Nbt {
+        #[label = "here"]
+        at: SourceSpan,
+        #[diagnostic_source]
+        #[source]
+        #[diagnostic(transparent)]
+        label: crate::nbt::Label,
+        last_token: Option<Item>,
+    },
+
+    #[error("{label}; last token was {last_token:?}")]
+    Builtin {
+        #[label = "here"]
+        at: SourceSpan,
+        label: aott::error::BuiltinLabel,
         last_token: Option<Item>,
     },
 }
 
-macro label_error($laty:ty => $variant:ident) {
-    impl<Item: Debug + Display + Char, I: InputType<Token = Item>> LabelError<I, $laty>
-        for SerializationError<Item>
-    {
-        fn from_label(span: Range<usize>, label: $laty, last_token: Option<Item>) -> Self {
-            Self::$variant {
-                at: span.into(),
-                label,
-                last_token,
+macro_rules! label_error {
+    ($variant:ident; u8 => $u8:ty) => {
+        impl<'a> aott::error::LabelError<&'a [u8], $u8> for crate::error::Error {
+            fn from_label(span: Range<usize>, label: $u8, last_token: Option<u8>) -> Self {
+                Self::Ser(SerializationError::$variant {
+                    at: span.into(),
+                    label,
+                    last_token,
+                })
             }
         }
+    };
+    ($variant:ident; char => $char:ty) => {
+        impl<'a> aott::error::LabelError<&'a str, $char> for crate::error::Error {
+            fn from_label(span: Range<usize>, label: $char, last_token: Option<char>) -> Self {
+                Self::SerStr(SerializationError::$variant {
+                    at: span.into(),
+                    label,
+                    last_token,
+                })
+            }
+        }
+    };
+    ($variant:ident => $u8:ty; $char:ty) => {
+        label_error!($variant; u8 => $u8);
+        label_error!($variant; char => $char);
+    };
+    ($laty:ty => $variant:ident) => {
+        label_error!($variant; u8 => $laty);
+        label_error!($variant; char => $laty);
     }
 }
 
 label_error!(super::types::Label => Type);
-label_error!(CharLabel<Item> => String);
+label_error!(String => CharLabel<u8>; CharLabel<char>);
+label_error!(Nbt; u8 => crate::nbt::Label);
+label_error!(aott::error::BuiltinLabel => Builtin);
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
-#[error("{}", any_of_display(.errors))]
-pub struct WithSource<Item: Debug + Display + 'static> {
+#[error("{errors:#?}")]
+pub struct WithSource<Item: Debug + Display + Char + 'static> {
     #[source_code]
     pub src: BytesSource,
     #[related]

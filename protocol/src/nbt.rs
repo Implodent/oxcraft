@@ -17,10 +17,13 @@ use serde::{
 };
 
 use crate::ser::*;
+use aott::iter::IterParser;
 
 #[derive(Clone, Debug, thiserror::Error, miette::Diagnostic)]
 pub enum Label {
-    InvalidTagType(u8)
+    #[error("invalid tag type {_0}, expected a byte in range 0..=12")]
+    #[diagnostic(code(nbt::error::invalid_tag_type))]
+    InvalidTagType(u8),
 }
 
 #[derive(Debug, Clone, derive_more::From)]
@@ -256,7 +259,8 @@ impl NbtTag {
                     v.ok_or(crate::error::Error::Nbt(NbtError::ExpectedAnythingButEnd))
                 })
                 .repeated()
-                .exactly(length),
+                .exactly(length)
+                .collect::<Vec<_>>(),
             tag,
         )(input)?;
 
@@ -284,7 +288,7 @@ pub enum NbtTagType {
 
 #[parser(extras = "Extra<()>")]
 fn nbt_tag(input: &[u8]) -> NbtTagType {
-    any.filter(|b| (0u8..=12u8).contains(b), |b| Label::)
+    any.filter(|b| (0u8..=12u8).contains(b), Label::InvalidTagType)
         // SAFETY: in filter we filter the tag types to be in bounds
         .map(|b| unsafe { *(&b as *const u8 as *const NbtTagType) })
         .parse_with(input)
@@ -328,10 +332,13 @@ impl<T: Deserialize> Deserialize for SmolArray<T> {
         debug_assert!(length >= 0);
         let length = length as usize;
 
-        T::deserialize
-            .repeated_custom::<Self>()
-            .exactly(length)
-            .parse_with(input)
+        Ok(Self(
+            T::deserialize
+                .repeated()
+                .exactly(length)
+                .collect()
+                .parse_with(input)?,
+        ))
     }
 }
 

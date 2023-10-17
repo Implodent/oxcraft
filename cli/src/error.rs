@@ -3,7 +3,8 @@ use std::{borrow::Cow, num::ParseIntError, ops::Range};
 use oxcr_protocol::{
     aott::{
         self,
-        text::{self, CharError},
+        error::LabelError,
+        text::{self, CharError, CharLabel},
     },
     miette::{self, SourceSpan},
     ser::any_of,
@@ -61,35 +62,21 @@ pub enum ParseError {
         #[source]
         error: ParseIntError,
     },
-    #[error("filter failed in {location}, while checking {token}")]
-    #[diagnostic(code(aott::error::filter_failed))]
-    FilterFailed {
-        #[label = "this is the token that didn't pass"]
-        at: SourceSpan,
-        location: &'static core::panic::Location<'static>,
-        token: char,
-    },
-    #[error("expected keyword {keyword}")]
-    #[diagnostic(code(aott::text::error::expected_keyword))]
-    ExpectedKeyword {
-        #[label = "the keyword here is {found}"]
-        at: SourceSpan,
-        keyword: String,
-        found: String,
-    },
-    #[error("expected digit of radix {radix}")]
-    #[diagnostic(code(aott::text::error::expected_digit))]
-    ExpectedDigit {
+
+    #[error("{label}; last token was {last_token:?}")]
+    Text {
         #[label = "here"]
         at: SourceSpan,
-        radix: u32,
-        found: char,
+        label: aott::text::CharLabel<char>,
+        last_token: Option<char>,
     },
-    #[error("expected identifier character (a-zA-Z or _), but found {found}")]
-    ExpectedIdent {
+
+    #[error("{label}; last token was {last_token:?}")]
+    Builtin {
         #[label = "here"]
         at: SourceSpan,
-        found: char,
+        label: aott::error::BuiltinLabel,
+        last_token: Option<char>,
     },
 }
 
@@ -105,7 +92,7 @@ pub enum Expectation {
     Digit(u32),
 }
 
-impl<'a> aott::error::Error<&'a str> for ParseError {
+impl<'a> aott::error::FundamentalError<&'a str> for ParseError {
     fn unexpected_eof(
         span: Range<usize>,
         expected: Option<Vec<<&'a str as aott::prelude::InputType>::Token>>,
@@ -134,45 +121,6 @@ impl<'a> aott::error::Error<&'a str> for ParseError {
             help: None,
         }
     }
-
-    fn filter_failed(
-        span: Range<usize>,
-        location: &'static core::panic::Location<'static>,
-        token: <&'a str as aott::prelude::InputType>::Token,
-    ) -> Self {
-        Self::FilterFailed {
-            at: span.into(),
-            location,
-            token,
-        }
-    }
 }
 
-impl CharError<char> for ParseError {
-    fn expected_digit(span: Range<usize>, radix: u32, got: char) -> Self {
-        Self::ExpectedDigit {
-            at: span.into(),
-            radix,
-            found: got,
-        }
-    }
-
-    fn expected_ident_char(span: Range<usize>, got: char) -> Self {
-        Self::ExpectedIdent {
-            at: span.into(),
-            found: got,
-        }
-    }
-
-    fn expected_keyword<'a, 'b: 'a>(
-        span: Range<usize>,
-        keyword: &'b <char as text::Char>::Str,
-        actual: &'a <char as text::Char>::Str,
-    ) -> Self {
-        Self::ExpectedKeyword {
-            at: span.into(),
-            keyword: keyword.to_owned(),
-            found: actual.to_owned(),
-        }
-    }
-}
+impl<'a> LabelError<&'a str, CharLabel<char>> for ParseError {}

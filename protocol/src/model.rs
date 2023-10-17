@@ -3,12 +3,12 @@ pub mod packets;
 pub mod registry;
 mod varint;
 use self::registry::RegistryItem;
-use aott::primitive::one_of;
+use aott::primitive::{filter, one_of};
 use bytes::BufMut;
 use std::{ops::RangeInclusive, ptr};
 pub use varint::*;
 
-use crate::ser::{Deserialize, Serialize};
+use crate::ser::{Deserialize, Serialize, Type};
 pub mod item;
 
 pub const MAX_PACKET_DATA: usize = 0x1FFFFF;
@@ -43,7 +43,7 @@ impl Deserialize for Difficulty {
     fn deserialize<'a>(
         input: &mut aott::prelude::Input<&'a [u8], crate::ser::Extra<Self::Context>>,
     ) -> aott::PResult<&'a [u8], Self, crate::ser::Extra<Self::Context>> {
-        let byte = one_of([0x0, 0x1, 0x2, 0x3])(input)?;
+        let byte = filter(|x| matches!(x, 0..=3), Type::Difficulty)(input)?;
         Ok(unsafe { *ptr::addr_of!(byte).cast() })
     }
 }
