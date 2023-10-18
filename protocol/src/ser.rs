@@ -22,7 +22,6 @@ use ::bytes::{BufMut, Bytes, BytesMut};
 pub use aott::prelude::parser;
 pub use aott::prelude::Parser;
 use aott::{error::FundamentalError, iter::IterParser, prelude::*};
-use tracing::debug;
 
 mod error;
 mod types;

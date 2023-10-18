@@ -34,10 +34,16 @@ impl<const N: usize, Sy: Syncable> Deserialize for FixedStr<N, Sy> {
             .map(|VarInt(x)| x)
             .filter(|x| *x >= 0, |x| Label::String(StringError::LengthOOB(x)))
             .map(|x| x as usize)
+            .filter(
+                |x| *x <= N,
+                |x| {
+                    Label::String(StringError::FixedLengthBigger {
+                        expected: N,
+                        actual: x,
+                    })
+                },
+            )
             .parse_with(input)?;
-        debug!(%length, expected_length=%N, "[fixedstr] checking length");
-        let length = length as usize;
-        assert!(length <= N);
         let string =
             std::str::from_utf8(input.input.slice((input.offset)..(input.offset + length)))
                 .expect("invalid utf8. that's a skill issue ngl");
