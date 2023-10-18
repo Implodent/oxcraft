@@ -3,7 +3,7 @@ pub mod packets;
 pub mod registry;
 mod varint;
 use self::registry::RegistryItem;
-use aott::primitive::{filter, one_of};
+use aott::primitive::filter;
 use bytes::BufMut;
 use std::{ops::RangeInclusive, ptr};
 pub use varint::*;

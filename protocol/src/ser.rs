@@ -21,7 +21,7 @@ use crate::model::VarInt;
 use ::bytes::{BufMut, Bytes, BytesMut};
 pub use aott::prelude::parser;
 pub use aott::prelude::Parser;
-use aott::{error::FundamentalError, iter::IterParser, pfn_type, prelude::*};
+use aott::{error::FundamentalError, iter::IterParser, prelude::*};
 use tracing::debug;
 
 mod error;

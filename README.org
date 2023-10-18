@@ -1,11 +1,8 @@
 * OxCraft - an alternative Minecraft server implementation
 
-** Structure
-*** ECS
-I chose Bevy for the ECS, not because it's better, but because Apecs is dog$hit.
-
-*** Serialization
-I chose AOTT for serialization, becuase serde is too much for me and implementing a serializer AND deserializer is just an awful process and I'm lazy.
+** FAQ
+*Why?* For fun.
+*When release ?!?!* Can't say for certain, but it's very far away.
 
 ** Sources
 - [[https://wiki.vg/index.php?title=Protocol&oldid=18375][Where I get protocol documentation]] (1.20.1)

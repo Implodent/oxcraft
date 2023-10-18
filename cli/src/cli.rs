@@ -101,12 +101,13 @@ pub fn flag_list(input: &str) -> Vec<FlagName<'a>> {
     }
     just("-")
         .ignore_then(choice((
-            slice(filter(|thing: &char| *thing != ' '))
-                .map(FlagName::Short)
-                .repeated(),
             just("-")
                 .ignore_then(ident)
                 .map(|name| vec![FlagName::Long(name)]),
+            slice(filter(|ch| *ch != ' ', Expectation::ShortFlag))
+                .map(FlagName::Short)
+                .repeated()
+                .collect::<Vec<_>>(),
         )))
         .parse_with(input)
 }

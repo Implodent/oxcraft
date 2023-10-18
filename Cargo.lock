@@ -1183,6 +1183,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxcr_proxy"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "futures-util",
+ "oxcr_cli",
+ "oxcr_protocol",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "oxcr_server"
 version = "0.1.0"
 dependencies = [

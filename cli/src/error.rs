@@ -5,7 +5,7 @@ use oxcr_protocol::{
         self,
         error::{BuiltinLabel, LabelError},
         primitive::SeqLabel,
-        text::{self, CharError, CharLabel},
+        text::CharLabel,
     },
     miette::{self, SourceSpan},
     ser::any_of,
@@ -25,17 +25,17 @@ pub enum ParseError {
         #[help]
         help: Option<Cow<'static, str>>,
     },
+
     #[error("unexpected end of input{}", .expected.as_ref().map(|expectation| format!(", expected {expectation}")).unwrap_or_else(String::new))]
-    #[diagnostic(
-        code(aott::error::unexpected_eof),
-        help("try giving it more input next time, I guess?")
-    )]
+    #[diagnostic(code(aott::error::unexpected_eof))]
     UnexpectedEof {
         #[label = "here"]
         at: SourceSpan,
         #[label = "last data here"]
         last_data_at: Option<SourceSpan>,
         expected: Option<Expectation>,
+        #[help]
+        help: Option<Cow<'static, str>>,
     },
     #[error("parsing a Level failed: {actual}")]
     #[diagnostic(code(cli::parse_level_error))]
@@ -80,7 +80,7 @@ pub enum ParseError {
         last_token: Option<char>,
     },
 
-    #[error("{label}; last token was {last_token:?}")]
+    #[error("expected {label:?}; last token was {last_token:?}")]
     Sequence {
         #[label = "here"]
         at: SourceSpan,
@@ -89,7 +89,7 @@ pub enum ParseError {
     },
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Clone)]
 pub enum Expectation {
     #[error("{}", any_of(.0))]
     AnyOf(Vec<char>),
@@ -99,6 +99,8 @@ pub enum Expectation {
     EndOfInput,
     #[error("a digit with radix {_0}")]
     Digit(u32),
+    #[error("a short flag character (anything but a whitespace)")]
+    ShortFlag,
 }
 
 impl<'a> aott::error::FundamentalError<&'a str> for ParseError {
@@ -110,6 +112,7 @@ impl<'a> aott::error::FundamentalError<&'a str> for ParseError {
             at: span.into(),
             last_data_at: None,
             expected: expected.map(Expectation::AnyOf),
+            help: None,
         }
     }
 
@@ -170,6 +173,56 @@ impl<'a> LabelError<&'a str, SeqLabel<char>> for ParseError {
             at: span.into(),
             label,
             last_token,
+        }
+    }
+}
+
+impl<'a> LabelError<&'a str, Expectation> for ParseError {
+    fn from_label(
+        span: Range<usize>,
+        label: Expectation,
+        last_token: Option<<&'a str as aott::prelude::InputType>::Token>,
+    ) -> Self {
+        if let Some(found) = last_token {
+            Self::Expected {
+                at: span.into(),
+                expected: label,
+                found,
+                help: None,
+            }
+        } else {
+            let last_data_at = (span.start.saturating_sub(1), span.end.saturating_sub(1)).into();
+            Self::UnexpectedEof {
+                at: span.into(),
+                last_data_at: Some(last_data_at),
+                expected: Some(label),
+                help: None,
+            }
+        }
+    }
+}
+
+impl<'a> LabelError<&'a str, (Expectation, Cow<'static, str>)> for ParseError {
+    fn from_label(
+        span: Range<usize>,
+        (label, help): (Expectation, Cow<'static, str>),
+        last_token: Option<<&'a str as aott::prelude::InputType>::Token>,
+    ) -> Self {
+        if let Some(found) = last_token {
+            Self::Expected {
+                at: span.into(),
+                expected: label,
+                found,
+                help: Some(help),
+            }
+        } else {
+            let last_data_at = (span.start.saturating_sub(1), span.end.saturating_sub(1)).into();
+            Self::UnexpectedEof {
+                at: span.into(),
+                last_data_at: Some(last_data_at),
+                expected: Some(label),
+                help: Some(help),
+            }
         }
     }
 }

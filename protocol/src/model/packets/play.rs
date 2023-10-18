@@ -6,7 +6,7 @@ use crate::{
 };
 use std::ptr;
 
-use aott::primitive::{filter, one_of};
+use aott::primitive::filter;
 use bytes::BufMut;
 use indexmap::IndexMap;
 
