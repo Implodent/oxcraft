@@ -23,16 +23,27 @@ use oxcr_protocol::{
     ser::FixedStr,
     PlayerNet,
 };
-use tokio::net::TcpSocket;
+use tokio::net::{TcpSocket, TcpStream};
 use tokio_util::sync::CancellationToken;
 use tracing::*;
 use tracing_subscriber::{
     prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
 
-async fn status(addr: SocketAddr) -> Result<u32> {
+async fn connect(addr: SocketAddr) -> Result<TcpStream> {
+    info!("trying to connect to {addr}...");
     let sock = TcpSocket::new_v4()?;
-    let stream = sock.connect(addr).await?;
+    match tokio::time::timeout(Duration::from_secs(10), sock.connect(addr)).await {
+        Ok(guh) => guh.map_err(Into::into),
+        Err(meh) => {
+            error!("connection to {addr} timed out...");
+            Err(meh.into())
+        }
+    }
+}
+
+async fn status(addr: SocketAddr) -> Result<u32> {
+    let stream = connect(addr).await?;
 
     let (read, write) = stream.into_split();
     let net = Arc::new(PlayerNet::new(
@@ -81,8 +92,7 @@ async fn one(index: usize, addr: SocketAddr) -> Result<()> {
 
     info!("[#{index}] ping: {ping}");
 
-    let sock = TcpSocket::new_v4()?;
-    let stream = sock.connect(addr).await?;
+    let stream = connect(addr).await?;
 
     let (read, write) = stream.into_split();
     let net = Arc::new(PlayerNet::new(
