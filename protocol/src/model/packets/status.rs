@@ -1,6 +1,6 @@
 use crate::{
     model::{chat::ChatComponent, State, VarInt},
-    ser::{Deserialize, Extra, Json, Serialize},
+    ser::{impl_ser, Deserialize, Extra, Json, Serialize},
 };
 use aott::parser::Parser;
 use aott::{bytes as b, prelude::parser};
@@ -24,6 +24,11 @@ impl Deserialize for StatusRequest {
         }
     }
 }
+impl Serialize for StatusRequest {
+    fn serialize_to(&self, _buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
+        Ok(())
+    }
+}
 impl Packet for StatusRequest {
     const ID: crate::model::VarInt = VarInt(0x00);
     const STATE: crate::model::State = State::Status;
@@ -34,15 +39,10 @@ pub struct StatusResponse {
     pub json_response: Json<StatusResponseJson>,
 }
 
+impl_ser!(|PacketContext| StatusResponse => [json_response]);
 impl Packet for StatusResponse {
     const ID: crate::model::VarInt = VarInt(0x00);
     const STATE: crate::model::State = State::Status;
-}
-
-impl Serialize for StatusResponse {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
-        self.json_response.serialize_to(buf)
-    }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -87,16 +87,8 @@ impl Packet for PingRequest {
     const ID: crate::model::VarInt = VarInt(0x01);
     const STATE: crate::model::State = State::Status;
 }
-impl Deserialize for PingRequest {
-    type Context = PacketContext;
 
-    #[parser(extras = "Extra<Self::Context>")]
-    fn deserialize(input: &[u8]) -> Self {
-        b::number::big::i64
-            .map(|payload| Self { payload })
-            .parse_with(input)
-    }
-}
+impl_ser!(|PacketContext| PingRequest => [payload]);
 
 #[derive(Debug)]
 pub struct PongResponse {
@@ -107,9 +99,5 @@ impl Packet for PongResponse {
     const ID: crate::model::VarInt = VarInt(0x01);
     const STATE: crate::model::State = State::Status;
 }
-impl Serialize for PongResponse {
-    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
-        buf.put_i64(self.payload);
-        Ok(())
-    }
-}
+
+impl_ser!(|PacketContext| PongResponse => [payload]);

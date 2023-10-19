@@ -132,7 +132,7 @@ use std::{
     net::SocketAddr,
     ops::{Deref, DerefMut},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -164,7 +164,7 @@ pub struct PlayerNet {
     pub peer_addr: SocketAddr,
     pub local_addr: SocketAddr,
     pub state: RwLock<State>,
-    pub compression: Option<usize>,
+    pub compression: Arc<AtomicIsize>,
     pub compressing: Arc<AtomicBool>,
     pub cancellator: CancellationToken,
 }
@@ -181,7 +181,7 @@ impl PlayerNet {
         mut read: OwnedReadHalf,
         mut write: OwnedWriteHalf,
         cancellator: CancellationToken,
-        compression: Option<usize>,
+        compression: Arc<AtomicIsize>,
     ) -> Self {
         let peer_addr = read.peer_addr().expect("no peer address");
         let local_addr = read.local_addr().expect("no local address");
@@ -191,13 +191,17 @@ impl PlayerNet {
 
         let compressing = Arc::new(AtomicBool::new(false));
 
+        let compression_ = compression.clone();
         let send_task = tokio::spawn(async move {
             let Err::<!, _>(e) = async {
                 loop {
                     let (compres, packet): (bool, SerializedPacket) = r_send.recv_async().await?;
-                    let data = if compression.is_some_and(|_| compres) {
+                    let compression = compression_.load(Ordering::SeqCst);
+                    let data = if compression > -1 && compres {
                         trace!("[send]compressing");
-                        packet.serialize_compressing(compression)?
+                        packet.serialize_compressing(
+                            (compression > -1).then_some(compression as usize),
+                        )?
                     } else {
                         trace!("[send]not compressing");
                         packet.serialize()?

@@ -147,7 +147,7 @@ pub macro impl_ser($(|$context:ty|)? $ty:ty => [$($(|$cx:ty|)?$field:ident),*$(,
 pub fn no_context<I: InputType, O, E: ParserExtras<I>, EV: ParserExtras<I, Context = ()>>(
     parser: impl Parser<I, O, EV>,
 ) -> impl Fn(&mut Input<I, E>) -> Result<O, EV::Error> {
-    move |input| parser.parse_with(&mut input.no_context())
+    with_context(parser, ())
 }
 
 #[inline(always)]
@@ -155,5 +155,10 @@ pub fn with_context<I: InputType, O, E: ParserExtras<I>, E2: ParserExtras<I, Con
     parser: impl Parser<I, O, E2>,
     context: C,
 ) -> impl Fn(&mut Input<I, E>) -> Result<O, E2::Error> {
-    move |input| parser.parse_with(&mut input.with_context(&context))
+    move |input| {
+        let mut inp = input.with_context(&context);
+        let out = parser.parse_with(&mut inp);
+        input.offset = inp.offset;
+        out
+    }
 }

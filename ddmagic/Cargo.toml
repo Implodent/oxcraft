@@ -1,0 +1,11 @@
+[package]
+name = "ddmagic"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+oxcr_protocol.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tokio-util.workspace = true

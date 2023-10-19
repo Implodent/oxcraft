@@ -1,10 +1,13 @@
-use aott::prelude::parser;
+use aott::{
+    prelude::{parser, Parser},
+    primitive::just,
+};
 use uuid::Uuid;
 
 use crate::{
     error::Error,
     model::{chat::ChatComponent, State, VarInt},
-    ser::{deser_cx, impl_ser, Deserialize, Extra, FixedStr, Json, Serialize},
+    ser::{deser_cx, impl_ser, no_context, Deserialize, Extra, FixedStr, Json, Serialize},
 };
 
 use super::{Packet, PacketContext};
@@ -15,22 +18,7 @@ pub struct LoginStart {
     pub uuid: Option<Uuid>,
 }
 
-impl Deserialize for LoginStart {
-    type Context = PacketContext;
-
-    #[parser(extras = "Extra<Self::Context>")]
-    fn deserialize(input: &[u8]) -> Self {
-        if input.context().id == Self::ID && input.context().state == Self::STATE {
-            let name = deser_cx(input)?;
-            let uuid = deser_cx(input)?;
-
-            Ok(Self { name, uuid })
-        } else {
-            let e = Error::InvalidPacketId(input.context().id.0);
-            Err(e)
-        }
-    }
-}
+impl_ser!(|PacketContext| LoginStart => [name, uuid]);
 
 impl Packet for LoginStart {
     const ID: crate::model::VarInt = VarInt(0x00);
@@ -76,6 +64,21 @@ impl Serialize for LoginSuccess {
         self.username.serialize_to(buf)?;
         VarInt(0).serialize_to(buf)?;
         Ok(())
+    }
+}
+
+impl Deserialize for LoginSuccess {
+    type Context = PacketContext;
+
+    fn deserialize<'a>(
+        input: &mut aott::prelude::Input<&'a [u8], Extra<Self::Context>>,
+    ) -> aott::PResult<&'a [u8], Self, Extra<Self::Context>> {
+        let uuid = no_context(Uuid::deserialize)(input)?;
+        let username = no_context(FixedStr::deserialize)(input)?;
+
+        just(0x0)(input)?;
+
+        Ok(Self { uuid, username })
     }
 }
 

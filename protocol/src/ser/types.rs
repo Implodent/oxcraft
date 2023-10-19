@@ -86,6 +86,12 @@ impl<const N: usize, Sy: Syncable> FixedStr<N, Sy> {
             })
         }
     }
+
+    pub unsafe fn new_unchecked(string: &str) -> Self {
+        Self {
+            inner: Sy::refc_from_str(string),
+        }
+    }
 }
 
 impl<const N: usize, Sy: Syncable> Deref for FixedStr<N, Sy> {

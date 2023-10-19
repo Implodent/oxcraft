@@ -3,7 +3,8 @@ members = [
         "protocol",
         "server",
         "cli",
-        "proxy"
+        "proxy",
+        "ddmagic"
 ]
 default-members = [ "protocol", "server" ]
 resolver = "2"

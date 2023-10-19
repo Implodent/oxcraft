@@ -639,6 +639,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ddmagic"
+version = "0.1.0"
+dependencies = [
+ "oxcr_protocol",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "derive_more"
 version = "0.99.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"

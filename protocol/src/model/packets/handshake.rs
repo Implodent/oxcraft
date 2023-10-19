@@ -16,6 +16,7 @@ pub struct Handshake {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[repr(i32)]
 pub enum HandshakeNextState {
     Status = 1,
     Login = 2,
@@ -41,6 +42,16 @@ impl Deserialize for Handshake {
                 s => return Err(Error::InvalidStateId(s)),
             },
         })
+    }
+}
+
+impl Serialize for Handshake {
+    fn serialize_to(&self, buf: &mut bytes::BytesMut) -> Result<(), crate::error::Error> {
+        self.protocol_version.serialize_to(buf)?;
+        self.addr.serialize_to(buf)?;
+        self.port.serialize_to(buf)?;
+        VarInt(self.next_state as i32).serialize_to(buf)?;
+        Ok(())
     }
 }
 
