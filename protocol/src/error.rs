@@ -63,6 +63,9 @@ pub enum Error {
     #[error("Connection ended")]
     #[diagnostic(code(protocol::error::connection_reset))]
     ConnectionEnded,
+    #[error("future timed out")]
+    #[diagnostic(code(tokio::timeout))]
+    Timeout(#[from] tokio::time::error::Elapsed),
 }
 
 pub type Result<T, E = Error> = core::result::Result<T, E>;

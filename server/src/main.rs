@@ -35,7 +35,10 @@ use oxcr_protocol::{
 };
 use std::{
     net::SocketAddr,
-    sync::{atomic::Ordering, Arc},
+    sync::{
+        atomic::{AtomicIsize, Ordering},
+        Arc,
+    },
 };
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -82,7 +85,8 @@ async fn login(net: Arc<PlayerNet>, cx: Arc<TaskContext>, ent_id: Entity) -> Res
 
     info!(?name, ?uuid, addr=%net.peer_addr, "Player joined");
 
-    if let Some(threshold) = net.compression {
+    let compre = net.compression.load(Ordering::SeqCst);
+    if let Some(threshold) = (compre > -1).then(|| compre as usize) {
         debug!(%threshold, ?net, "compressing");
 
         net.send_packet(SetCompression {
@@ -300,7 +304,12 @@ fn listen(net: Res<NetNet>, rt: Res<TokioTasksRuntime>) {
                 .run_on_main_thread(|tcx| *tcx.world.resource::<CompressionThreshold>())
                 .await;
 
-            let player = PlayerNet::new(read, write, cancellator.child_token(), compress);
+            let player = PlayerNet::new(
+                read,
+                write,
+                cancellator.child_token(),
+                Arc::new(AtomicIsize::new(compress.map(|x| x as isize).unwrap_or(-1))),
+            );
             let entity = t
                 .clone()
                 .run_on_main_thread(move |cx| {
