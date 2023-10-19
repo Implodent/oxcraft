@@ -1,0 +1,5 @@
+* DDMagic
+This is a tool for testing how strong your server is against botting.
+
+This tool is provided *AS-IS* without any warranty.
+The authors of this tool are not responsible for any legal penalties you may receive for using this tool.
