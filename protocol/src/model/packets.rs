@@ -97,7 +97,7 @@ impl SerializedPacket {
                 trace!(
                     threshold=%cmp,
                     actual_length=%self.length,
-                    cmpr_length=%self.length + 1,
+                    cmpr_length=%(self.length + 1),
                     id_length=%self.id.length_of(),
                     data_length=%self.data.len(),
                     "packet was smaller than threshold, sending uncompressed"
@@ -187,7 +187,9 @@ impl SerializedPacketCompressed {
             let id = P::ID;
             let data_length = id.length_of() + data.len();
             let datalength = VarInt::<i32>(data_length.try_into().unwrap());
-            let length = datalength.length_of() + Compress(datalength, Zlib).serialize()?.len();
+            let length = datalength.length_of() + Compress((&id, &data), Zlib).serialize()?.len();
+
+
             Self {
                 length,
                 data_length,
@@ -271,6 +273,8 @@ impl Deserialize for SerializedPacketCompressed {
 
 impl Serialize for SerializedPacketCompressed {
     fn serialize_to(&self, buf: &mut BytesMut) -> Result<(), Error> {
+        trace!(%self.id, %self.data_length, %self.length, ?self.data, "serializing SPC");
+
         let length = VarInt::<i32>(self.length.try_into().map_err(|_| Error::VarIntTooBig)?);
         length.serialize_to(buf)?;
         let data_length = VarInt::<i32>(

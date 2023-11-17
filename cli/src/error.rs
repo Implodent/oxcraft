@@ -3,7 +3,7 @@ use std::{borrow::Cow, num::ParseIntError, ops::Range};
 use oxcr_protocol::{
     aott::{
         self,
-        error::{BuiltinLabel, LabelError},
+        error::LabelError,
         primitive::SeqLabel,
         text::CharLabel,
     },
@@ -72,14 +72,6 @@ pub enum ParseError {
         last_token: Option<char>,
     },
 
-    #[error("{label}; last token was {last_token:?}")]
-    Builtin {
-        #[label = "here"]
-        at: SourceSpan,
-        label: aott::error::BuiltinLabel,
-        last_token: Option<char>,
-    },
-
     #[error("expected {label:?}; last token was {last_token:?}")]
     Sequence {
         #[label = "here"]
@@ -103,7 +95,7 @@ pub enum Expectation {
     ShortFlag,
 }
 
-impl<'a> aott::error::FundamentalError<&'a str> for ParseError {
+impl<'a> aott::error::Error<&'a str> for ParseError {
     fn unexpected_eof(
         span: Range<usize>,
         expected: Option<Vec<<&'a str as aott::prelude::InputType>::Token>>,
@@ -142,20 +134,6 @@ impl<'a> LabelError<&'a str, CharLabel<char>> for ParseError {
         last_token: Option<<&'a str as aott::prelude::InputType>::Token>,
     ) -> Self {
         Self::Text {
-            at: span.into(),
-            label,
-            last_token,
-        }
-    }
-}
-
-impl<'a> LabelError<&'a str, BuiltinLabel> for ParseError {
-    fn from_label(
-        span: Range<usize>,
-        label: BuiltinLabel,
-        last_token: Option<<&'a str as aott::prelude::InputType>::Token>,
-    ) -> Self {
-        Self::Builtin {
             at: span.into(),
             label,
             last_token,

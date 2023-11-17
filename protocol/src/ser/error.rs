@@ -46,7 +46,7 @@ pub enum SerializationError<Item: Debug + Display + Char> {
         last_token: Option<Item>,
     },
 
-    #[error("{label}; last token is {last_token:?}")]
+    #[error("text parsing error: {label}")]
     String {
         #[label = "here"]
         at: SourceSpan,
@@ -54,7 +54,7 @@ pub enum SerializationError<Item: Debug + Display + Char> {
         last_token: Option<Item>,
     },
 
-    #[error("{label}; last token was {last_token:?}")]
+    #[error("NBT error: {label}")]
     Nbt {
         #[label = "here"]
         at: SourceSpan,
@@ -62,14 +62,6 @@ pub enum SerializationError<Item: Debug + Display + Char> {
         #[source]
         #[diagnostic(transparent)]
         label: crate::nbt::Label,
-        last_token: Option<Item>,
-    },
-
-    #[error("{label}; last token was {last_token:?}")]
-    Builtin {
-        #[label = "here"]
-        at: SourceSpan,
-        label: aott::error::BuiltinLabel,
         last_token: Option<Item>,
     },
 }
@@ -110,7 +102,6 @@ macro_rules! label_error {
 label_error!(super::types::Label => Type);
 label_error!(String => CharLabel<u8>; CharLabel<char>);
 label_error!(Nbt; u8 => crate::nbt::Label);
-label_error!(aott::error::BuiltinLabel => Builtin);
 
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
 #[error("{errors:#?}")]
@@ -253,7 +244,7 @@ impl<'a, C> ParserExtras<&'a [u8]> for Extra<C> {
     type Error = crate::error::Error;
 }
 
-impl<'a> FundamentalError<&'a [u8]> for crate::error::Error {
+impl<'a> aott::error::Error<&'a [u8]> for crate::error::Error {
     fn expected_eof_found(span: Range<usize>, found: <&'a [u8] as InputType>::Token) -> Self {
         Self::Ser(SerializationError::ExpectedEof {
             found,
@@ -289,7 +280,7 @@ impl<'a, C> ParserExtras<&'a str> for Extra<C> {
     type Error = crate::error::Error;
 }
 
-impl<'a> FundamentalError<&'a str> for crate::error::Error {
+impl<'a> aott::error::Error<&'a str> for crate::error::Error {
     fn expected_eof_found(span: Range<usize>, found: <&'a str as InputType>::Token) -> Self {
         Self::SerStr(SerializationError::ExpectedEof {
             found,

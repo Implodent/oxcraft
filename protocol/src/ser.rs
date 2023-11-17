@@ -21,7 +21,7 @@ use crate::model::VarInt;
 use ::bytes::{BufMut, Bytes, BytesMut};
 pub use aott::prelude::parser;
 pub use aott::prelude::Parser;
-use aott::{error::FundamentalError, iter::IterParser, prelude::*};
+use aott::{iter::IterParser, prelude::*};
 
 mod error;
 mod types;
@@ -74,7 +74,7 @@ pub type Resul<'a, T, C = ()> = PResult<&'a [u8], T, Extra<C>>;
 
 #[parser(extras = "Extra<C>")]
 pub fn deser_cx<T: Deserialize<Context = ()>, C>(input: &[u8]) -> T {
-    input.no_context().parse(&T::deserialize)
+    input.parse_no_context(&T::deserialize)
 }
 
 #[parser(extras = "Extra<C>")]

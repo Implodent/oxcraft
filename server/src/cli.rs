@@ -45,11 +45,11 @@ fn flags(input: &str) -> Vec<Flag> {
                     FlagName::Short("p") | FlagName::Long("port") => {
                         one_of(" =")(input)?;
 
-                        Flag::Port(text::int(10).try_map_with_span(|int: &str, span| {
+                        Flag::Port(text::int(10).try_map(|int: &str, extra| {
                             int.parse::<u16>().map_err(|error| ParseError::ExpectedNumber {
                                 radix: 10,
                                 actual: int.to_owned(),
-                                at: span.clone().into(),
+                                at: Into::<miette::SourceSpan>::into(extra.span()),
                                 help: Some(Cow::Borrowed("a port can only be a u16 (0 ... 65535), but your input either didn't fit into a u16 or isn't a number at all.")),
                                 error
                             })

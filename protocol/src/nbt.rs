@@ -255,7 +255,7 @@ impl NbtTag {
 
         let tags = with_context(
             Nbt::single
-                .try_map(|v: Option<Nbt>| {
+                .try_map(|v: Option<Nbt>, _| {
                     v.ok_or(crate::error::Error::Nbt(NbtError::ExpectedAnythingButEnd))
                 })
                 .repeated()
